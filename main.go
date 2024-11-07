@@ -3,73 +3,93 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
+	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
-type errMsg error
-
-type model struct {
-	spinner  spinner.Model
-	quitting bool
-	err      error
+type Model struct {
+	content  strings.Builder
+	ready    bool
+	viewport viewport.Model
 }
 
-var quitKeys = key.NewBinding(
-	key.WithKeys("q", "esc", "ctrl+c"),
-	key.WithHelp("", "press q to quit"),
-)
+func (m *Model) runCmd() tea.Msg {
+	cmd := exec.Command("bash", "fake_process.sh")
+	stdout, _ := cmd.StdoutPipe()
 
-func initialModel() model {
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	return model{spinner: s}
-}
+	if err := cmd.Start(); err != nil {
+		return tea.Quit()
+	}
 
-func (m model) Init() tea.Cmd {
-	return m.spinner.Tick
-}
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-
-	case tea.KeyMsg:
-		if key.Matches(msg, quitKeys) {
-			m.quitting = true
-			return m, tea.Quit
-
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			n, err := stdout.Read(buf)
+			if err != nil {
+				break
+			}
+			m.content.Write(buf[:n])
 		}
-		return m, nil
-	case errMsg:
-		m.err = msg
-		return m, nil
+	}()
 
-	default:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
-	}
+	return nil
 }
 
-func (m model) View() string {
-	if m.err != nil {
-		return m.err.Error()
-	}
-	str := fmt.Sprintf("\n\n   %s Loading forever... %s\n\n", m.spinner.View(), quitKeys.Help().Desc)
-	if m.quitting {
-		return str + "\n"
-	}
-	return str
+func (m *Model) Init() tea.Cmd {
+	return m.runCmd
 }
+
+func (m *Model) View() string {
+	if !m.ready {
+		return "Loading..."
+	}
+	return m.viewport.View()
+}
+
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if k := msg.String(); k == "ctrl+c" || k == "q" || k == "esc" {
+			return m, tea.Quit
+		}
+
+	case tickMsg:
+		m.viewport.SetContent(m.content.String())
+		m.viewport.GotoBottom()
+
+	case tea.WindowSizeMsg:
+		if !m.ready {
+			m.viewport = viewport.New(msg.Width, msg.Height-10)
+			m.viewport.YPosition = 5
+			m.viewport.HighPerformanceRendering = false
+			m.viewport.SetContent("Loading...")
+			m.ready = true
+			break
+		}
+		m.viewport.Width = msg.Width
+		m.viewport.Height = msg.Height - 10
+	}
+
+	return m, nil
+}
+
+type tickMsg time.Time
 
 func main() {
-	p := tea.NewProgram(initialModel())
-	if _, err := p.Run(); err != nil {
-		fmt.Println(err)
+	cmd := tea.NewProgram(&Model{})
+
+	go func() {
+		for c := range time.Tick(100 * time.Millisecond) {
+			cmd.Send(tickMsg(c))
+		}
+	}()
+
+	if _, err := cmd.Run(); err != nil {
+		fmt.Printf("Uh oh: %v\n", err)
 		os.Exit(1)
 	}
 }
