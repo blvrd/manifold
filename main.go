@@ -42,6 +42,7 @@ func (m *Model) runCmd() tea.Msg {
 
 func (m *Model) Init() tea.Cmd {
 	logFile, err := os.OpenFile("multiplexer.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile("debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Printf("Error opening log file: %v\n", err)
 		os.Exit(1)
