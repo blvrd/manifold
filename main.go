@@ -18,6 +18,11 @@ type externalCmd struct {
 	commandStrings []string
 }
 
+type size struct {
+	width  int
+	height int
+}
+
 type Model struct {
 	content      strings.Builder
 	ready        bool
@@ -26,12 +31,14 @@ type Model struct {
 	TabContent   []strings.Builder
 	activeTab    int
 	externalCmds []externalCmd
+	terminalSize size
 }
 
-func (m *Model) runCmd(commandStrings []string) tea.Cmd {
+func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 	return func() tea.Msg {
 		// m.content.Reset()
-    cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
+		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
+		log.Debugf("🪚 cmd: %#v", cmd)
 		stdout, _ := cmd.StdoutPipe()
 
 		if err := cmd.Start(); err != nil {
@@ -45,7 +52,7 @@ func (m *Model) runCmd(commandStrings []string) tea.Cmd {
 				if err != nil {
 					break
 				}
-				m.content.Write(buf[:n])
+				m.TabContent[tabIndex].Write(buf[:n])
 			}
 		}()
 
@@ -67,12 +74,13 @@ func (m *Model) Init() tea.Cmd {
 
 	m.externalCmds = []externalCmd{
 		externalCmd{name: "web", commandStrings: []string{"bash", "fake_process.sh"}},
+		externalCmd{name: "git status", commandStrings: []string{"git", "status"}},
 	}
 
 	var cmds []tea.Cmd
-	for _, c := range m.externalCmds {
+	for i, c := range m.externalCmds {
 		m.Tabs = append(m.Tabs, c.name)
-		cmds = append(cmds, m.runCmd(c.commandStrings))
+		cmds = append(cmds, m.runCmd(i, c.commandStrings))
 		m.TabContent = append(m.TabContent, strings.Builder{})
 	}
 	return tea.Batch(cmds...)
@@ -130,7 +138,7 @@ func (m *Model) View() string {
 	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
 	doc.WriteString(row)
 	doc.WriteString("\n")
-	doc.WriteString(windowStyle.Width((lipgloss.Width(row) - windowStyle.GetHorizontalFrameSize())).Render(m.viewport.View()))
+	doc.WriteString(windowStyle.Width((m.terminalSize.width - windowStyle.GetHorizontalFrameSize())).Render(m.viewport.View()))
 	return docStyle.Render(doc.String())
 }
 
@@ -143,8 +151,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
 		case "r":
-			m.content.Reset()
-			m.content.WriteString("restarting process")
+			// m.content.Reset()
+			// m.content.WriteString("restarting process")
 			return m, nil // should runCmd for the current tab
 		case "right", "l", "n", "tab":
 			m.activeTab = min(m.activeTab+1, len(m.Tabs)-1)
@@ -155,16 +163,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tickMsg:
-		m.viewport.SetContent(m.content.String())
-		// m.viewport.GotoBottom()
-
+		m.viewport.SetContent(m.TabContent[m.activeTab].String())
+		m.viewport.GotoBottom()
 	case tea.WindowSizeMsg:
 		if !m.ready {
-      m.viewport = viewport.New(msg.Width, msg.Height-10)
-      m.viewport.YPosition = 5
-      m.viewport.HighPerformanceRendering = false
-      m.viewport.SetContent("Loading...")
-      m.ready = true
+			m.viewport = viewport.New(msg.Width, msg.Height-10)
+			m.viewport.SetContent("Loading...")
+			m.ready = true
 			break
 		}
 		m.viewport.Width = msg.Width
