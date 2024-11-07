@@ -41,8 +41,8 @@ func (m *Model) runCmd() tea.Msg {
 }
 
 func (m *Model) Init() tea.Cmd {
-	logFile, err := os.OpenFile("multiplexer.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	logFile, err := os.OpenFile("debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+  logFile, err := os.OpenFile("debug.log", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+
 	if err != nil {
 		fmt.Printf("Error opening log file: %v\n", err)
 		os.Exit(1)
@@ -62,6 +62,8 @@ func (m *Model) View() string {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if k := msg.String(); k == "ctrl+c" || k == "q" || k == "esc" {
@@ -70,7 +72,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.viewport.SetContent(m.content.String())
-		m.viewport.GotoBottom()
+		// m.viewport.GotoBottom()
 
 	case tea.WindowSizeMsg:
 		if !m.ready {
@@ -85,13 +87,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Height = msg.Height - 10
 	}
 
-	return m, nil
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
 }
 
 type tickMsg time.Time
 
 func main() {
-	cmd := tea.NewProgram(&Model{})
+	cmd := tea.NewProgram(&Model{}, tea.WithAltScreen())
 
 	go func() {
 		for c := range time.Tick(100 * time.Millisecond) {
