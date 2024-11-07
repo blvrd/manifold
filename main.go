@@ -19,6 +19,7 @@ type Model struct {
 }
 
 func (m *Model) runCmd() tea.Msg {
+	m.content.Reset()
 	cmd := exec.Command("bash", "fake_process.sh")
 	stdout, _ := cmd.StdoutPipe()
 
@@ -70,6 +71,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     case "ctrl+c", "q", "esc":
 			return m, tea.Quit
     }
+		case "r":
+			m.content.Reset()
+			m.content.WriteString("restarting process")
+			return m, m.runCmd
+		}
 
 	case tickMsg:
 		m.viewport.SetContent(m.content.String())
