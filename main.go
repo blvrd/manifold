@@ -66,9 +66,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if k := msg.String(); k == "ctrl+c" || k == "q" || k == "esc" {
+    switch msg.String() {
+    case "ctrl+c", "q", "esc":
 			return m, tea.Quit
-		}
+    }
 
 	case tickMsg:
 		m.viewport.SetContent(m.content.String())
