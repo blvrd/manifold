@@ -13,9 +13,12 @@ import (
 )
 
 type Model struct {
-	content  strings.Builder
-	ready    bool
-	viewport viewport.Model
+	content    strings.Builder
+	ready      bool
+	viewport   viewport.Model
+	Tabs       []string
+	TabContent []viewport.Model
+	activeTab  int
 }
 
 func (m *Model) runCmd() tea.Msg {
@@ -42,7 +45,7 @@ func (m *Model) runCmd() tea.Msg {
 }
 
 func (m *Model) Init() tea.Cmd {
-  logFile, err := os.OpenFile("debug.log", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	logFile, err := os.OpenFile("debug.log", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 
 	if err != nil {
 		fmt.Printf("Error opening log file: %v\n", err)
@@ -67,10 +70,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-    switch msg.String() {
-    case "ctrl+c", "q", "esc":
+		switch msg.String() {
+		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
-    }
 		case "r":
 			m.content.Reset()
 			m.content.WriteString("restarting process")
