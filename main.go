@@ -236,6 +236,7 @@ var (
 	windowStyle      = lipgloss.NewStyle().Padding(2)
 	highlightColor   = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
 	borderColor      = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#3e3e3e"}
+	lightText        = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#9f9f9f"}
 	activeTabStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).BorderForeground(highlightColor).Padding(0, 1)
 	inactiveTabStyle = lipgloss.NewStyle().Border(lipgloss.HiddenBorder(), true).Padding(0, 1)
 )
@@ -244,7 +245,6 @@ func (m *Model) View() string {
 	if !m.ready {
 		return "Loading..."
 	}
-	// return m.viewport.View()
 	doc := strings.Builder{}
 
 	var renderedTabs []string
@@ -264,6 +264,8 @@ func (m *Model) View() string {
 	doc.WriteString(row)
 	doc.WriteString("\n")
 
+	doc.WriteString(lipgloss.NewStyle().Foreground(lightText).Render(fmt.Sprintf("Running: %s", strings.Join(m.externalCmds[m.activeTab].commandStrings, " "))))
+	doc.WriteString("\n")
 	if m.viewport.TotalLineCount() > m.viewport.VisibleLineCount() {
 		doc.WriteString(
 			lipgloss.JoinHorizontal(lipgloss.Center, docStyle.Width((m.terminalSize.width-docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(borderColor).Render(m.viewport.View()), m.scrollbar.View()),
