@@ -347,12 +347,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentTab().Following = false
 			return m, nil
 		}
-
 	case tickMsg:
 		m.viewport.SetContent(m.TabContent[m.activeTab].String())
 		if m.currentTab().Following {
 			m.viewport.GotoBottom()
 		}
+	case tea.MouseMsg:
+		if msg.Action != tea.MouseActionPress {
+			break
+		}
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+      m.currentTab().Following = false
+    case tea.MouseButtonWheelDown:
+      m.viewport, cmd = m.viewport.Update(msg)
+      cmds = append(cmds, cmd)
+      m.scrollbar, cmd = m.scrollbar.Update(m.viewport)
+      cmds = append(cmds, cmd)
+
+      // scrolling to the bottom is sticky
+      if m.viewport.AtBottom() {
+        m.currentTab().Following = true
+      }
+		}
+
 	case tea.WindowSizeMsg:
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width-20, msg.Height-20)
@@ -395,7 +413,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 type tickMsg time.Time
 
 func main() {
-	cmd := tea.NewProgram(&Model{}, tea.WithAltScreen())
+	cmd := tea.NewProgram(&Model{}, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	go func() {
 		for c := range time.Tick(100 * time.Millisecond) {
