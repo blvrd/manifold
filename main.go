@@ -336,11 +336,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.switchTab(TabNext)
 		case "left", "h", "p", "shift+tab":
 			return m, m.switchTab(TabPrevious)
+		case "f":
+			m.currentTab().Following = true
+			return m, nil
 		}
 
 	case tickMsg:
 		m.viewport.SetContent(m.TabContent[m.activeTab].String())
-		// m.viewport.GotoBottom()
+		if m.currentTab().Following {
+			m.viewport.GotoBottom()
+		}
 	case tea.WindowSizeMsg:
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width-20, msg.Height-20)
