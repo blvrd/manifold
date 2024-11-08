@@ -11,6 +11,9 @@ COLORS=(
 )
 RESET="\033[0m"     # Reset color
 
+trap 'echo "Received SIGTERM, shutting down..."; exit 0' SIGTERM
+trap 'echo "Received SIGINT, shutting down..."; exit 0' SIGINT
+
 # Array of random messages
 messages=(
     "System running smoothly"
