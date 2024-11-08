@@ -41,6 +41,6 @@ while true; do
     echo -e "${color}$(date '+%Y-%m-%d %H:%M:%S') - $message${RESET}"
 
     # Sleep for 1 second
-    sleep 0.5
+    sleep 0.1
 done
 
