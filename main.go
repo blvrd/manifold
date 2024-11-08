@@ -32,18 +32,38 @@ type Model struct {
 	TabContent   []strings.Builder
 	activeTab    int
 	externalCmds []externalCmd
+	runningCmds  map[int]*exec.Cmd
 	terminalSize size
+}
+
+type processErrorMsg struct {
+	tabIndex int
+	err      error
+}
+
+type processExitMsg struct {
+	tabIndex int
+	err      error
 }
 
 func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 	return func() tea.Msg {
-		// m.content.Reset()
+		if m.runningCmds == nil {
+			m.runningCmds = make(map[int]*exec.Cmd)
+		}
+
+		if cmd, exists := m.runningCmds[tabIndex]; exists && cmd != nil && cmd.Process != nil {
+			m.killProcess(tabIndex)
+		}
+
 		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
 		stdout, _ := cmd.StdoutPipe()
 
 		if err := cmd.Start(); err != nil {
-			return tea.Quit()
+			return processErrorMsg{tabIndex: tabIndex, err: err}
 		}
+
+		m.runningCmds[tabIndex] = cmd
 
 		go func() {
 			buf := make([]byte, 1024)
@@ -60,6 +80,67 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 	}
 }
 
+func (m *Model) killProcess(tabIndex int) error {
+	cmd, exists := m.runningCmds[tabIndex]
+	if !exists || cmd == nil || cmd.Process == nil {
+		return nil
+	}
+
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		log.Warnf("Failed to send SIGRTERM to process %d: %v", tabIndex, err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		delete(m.runningCmds, tabIndex)
+		return err
+	case <-time.After(3 * time.Second):
+		if err := cmd.Process.Kill(); err != nil {
+			return fmt.Errorf("failed to kill process %d: %v", tabIndex, err)
+		}
+		delete(m.runningCmds, tabIndex)
+		return fmt.Errorf("process %d killed after timeout", tabIndex)
+	}
+}
+
+func (m *Model) cleanup() error {
+	var errors []error
+	done := make(chan bool)
+
+	go func() {
+		for tabIndex := range m.runningCmds {
+			if err := m.killProcess(tabIndex); err != nil {
+				errors = append(errors, fmt.Errorf("tab %d: %w", tabIndex, err))
+			}
+		}
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		if len(errors) > 0 {
+			return fmt.Errorf("cleanup errors: %v", errors)
+		}
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("cleanup timed out after 10 seconds")
+	}
+
+	return nil
+}
+
+func (m *Model) restartProcess(tabIndex int) tea.Cmd {
+	if tabIndex < 0 || tabIndex >= len(m.externalCmds) {
+		return nil // might be a good candidate for an assert a la tiger style
+	}
+
+	return m.runCmd(tabIndex, m.externalCmds[tabIndex].commandStrings)
+}
+
 func (m *Model) Init() tea.Cmd {
 	logFile, err := os.OpenFile("debug.log", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 
@@ -72,7 +153,8 @@ func (m *Model) Init() tea.Cmd {
 	log.SetLevel(log.DebugLevel)
 	log.Info("application started")
 
-  m.externalCmds, err = parseProcfile("./Procfile.dev")
+	m.runningCmds = make(map[int]*exec.Cmd)
+	m.externalCmds, err = parseProcfile("./Procfile.dev")
 
 	var cmds []tea.Cmd
 	for i, c := range m.externalCmds {
@@ -128,11 +210,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
+			if err := m.cleanup(); err != nil {
+				log.Errorf("Cleanup error: %v", err)
+			}
 			return m, tea.Quit
 		case "r":
-			// m.content.Reset()
-			// m.content.WriteString("restarting process")
-			return m, nil // should runCmd for the current tab
+			return m, m.restartProcess(m.activeTab)
 		case "right", "l", "n", "tab":
 			m.activeTab = min(m.activeTab+1, len(m.Tabs)-1)
 			return m, nil
@@ -153,6 +236,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.Width = msg.Width - 10
 		m.viewport.Height = msg.Height - 20
+	case processErrorMsg:
+		if msg.err != nil {
+			log.Errorf("Process error on tab %d: %v", msg.tabIndex, msg.err)
+			m.TabContent[msg.tabIndex].WriteString(fmt.Sprintf("\nError: %v\n", msg.err))
+		}
+	case processExitMsg:
+		if msg.err != nil {
+			log.Warnf("Process on tab %d exited with error: %v", msg.tabIndex, msg.err)
+			m.TabContent[msg.tabIndex].WriteString(fmt.Sprintf("\nProcess exited %v\n", msg.err))
+		}
+		delete(m.runningCmds, msg.tabIndex)
 	}
 
 	m.viewport, cmd = m.viewport.Update(msg)
