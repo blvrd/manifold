@@ -1,0 +1,3 @@
+web: bash fake_process.sh
+git: git status
+another_thing: bash fake_process.sh

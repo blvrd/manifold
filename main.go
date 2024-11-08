@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -71,10 +72,7 @@ func (m *Model) Init() tea.Cmd {
 	log.SetLevel(log.DebugLevel)
 	log.Info("application started")
 
-	m.externalCmds = []externalCmd{
-		externalCmd{name: "web", commandStrings: []string{"bash", "fake_process.sh"}},
-		externalCmd{name: "git status", commandStrings: []string{"git", "status"}},
-	}
+  m.externalCmds, err = parseProcfile("./Procfile.dev")
 
 	var cmds []tea.Cmd
 	for i, c := range m.externalCmds {
@@ -190,4 +188,50 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func parseProcfile(filepath string) ([]externalCmd, error) {
+	file, err := os.Open(filepath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var commands []externalCmd
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Split on first colon
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue // Skip invalid lines
+		}
+
+		name := strings.TrimSpace(parts[0])
+		cmdString := strings.TrimSpace(parts[1])
+
+		// Simply split by spaces
+		cmdParts := strings.Fields(cmdString)
+
+		if len(cmdParts) > 0 {
+			cmd := externalCmd{
+				name:           name,
+				commandStrings: cmdParts,
+			}
+			commands = append(commands, cmd)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return commands, nil
 }
