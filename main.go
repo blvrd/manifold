@@ -226,7 +226,7 @@ func (m *Model) Init() tea.Cmd {
 	for i, c := range m.externalCmds {
 		m.Tabs = append(m.Tabs, c.name)
 		cmds = append(cmds, m.runCmd(i, c.commandStrings))
-		m.TabContent = append(m.TabContent, newBufferedOutput(1000))
+		m.TabContent = append(m.TabContent, newBufferedOutput(10000))
 	}
 	return tea.Batch(cmds...)
 }
