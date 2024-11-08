@@ -38,7 +38,6 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 	return func() tea.Msg {
 		// m.content.Reset()
 		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
-		log.Debugf("🪚 cmd: %#v", cmd)
 		stdout, _ := cmd.StdoutPipe()
 
 		if err := cmd.Start(); err != nil {
