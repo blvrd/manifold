@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blvrd/manifold/scrollbar"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -77,6 +78,7 @@ type Model struct {
 	runningCmds  map[int]*exec.Cmd
 	cmdsMutex    sync.Mutex
 	terminalSize size
+	scrollbar    tea.Model
 }
 
 type processErrorMsg struct {
@@ -230,7 +232,8 @@ func (m *Model) Init() tea.Cmd {
 }
 
 var (
-	docStyle         = lipgloss.NewStyle().Padding(2)
+	docStyle         = lipgloss.NewStyle().Padding(0)
+	windowStyle      = lipgloss.NewStyle().Padding(2)
 	highlightColor   = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
 	borderColor      = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#3e3e3e"}
 	activeTabStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).BorderForeground(highlightColor).Padding(0, 1)
@@ -261,14 +264,21 @@ func (m *Model) View() string {
 	doc.WriteString(row)
 	doc.WriteString("\n")
 
-	doc.WriteString(
-		docStyle.Width((m.terminalSize.width - docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(borderColor).Render(m.viewport.View()),
-	)
-	return docStyle.Render(doc.String())
+	if m.viewport.TotalLineCount() > m.viewport.VisibleLineCount() {
+		doc.WriteString(
+			lipgloss.JoinHorizontal(lipgloss.Center, docStyle.Width((m.terminalSize.width-docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(borderColor).Render(m.viewport.View()), m.scrollbar.View()),
+		)
+	} else {
+		doc.WriteString(
+			docStyle.Width((m.terminalSize.width - docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(borderColor).Render(m.viewport.View()),
+		)
+	}
+	return windowStyle.Render(doc.String())
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -290,16 +300,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.viewport.SetContent(m.TabContent[m.activeTab].String())
-		m.viewport.GotoBottom()
+		// m.viewport.GotoBottom()
 	case tea.WindowSizeMsg:
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width-10, msg.Height-20)
+			m.viewport = viewport.New(msg.Width-20, msg.Height-20)
+			// TrackStyle: lipgloss.NewStyle().SetString("│"),
+			m.scrollbar = scrollbar.NewVertical(
+				scrollbar.WithThumbStyle(lipgloss.NewStyle().Foreground(highlightColor).SetString("┃")),
+				scrollbar.WithTrackStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).SetString("│")),
+			)
+			m.scrollbar, cmd = m.scrollbar.Update(scrollbar.HeightMsg(m.viewport.Height))
+			cmds = append(cmds, cmd)
 			m.viewport.SetContent("Loading...")
 			m.ready = true
 			break
 		}
-		m.viewport.Width = msg.Width - 10
+		m.viewport.Width = msg.Width - 20
 		m.viewport.Height = msg.Height - 20
+		m.scrollbar, cmd = m.scrollbar.Update(scrollbar.HeightMsg(m.viewport.Height))
+		cmds = append(cmds, cmd)
 	case processErrorMsg:
 		if msg.err != nil {
 			log.Errorf("Process error on tab %d: %v", msg.tabIndex, msg.err)
@@ -314,7 +333,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	m.viewport, cmd = m.viewport.Update(msg)
-	return m, cmd
+	cmds = append(cmds, cmd)
+	m.scrollbar, cmd = m.scrollbar.Update(m.viewport)
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
 }
 
 type tickMsg time.Time
