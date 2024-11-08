@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/blvrd/manifold/scrollbar"
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -85,6 +87,8 @@ type Model struct {
 	cmdsMutex    sync.Mutex
 	terminalSize size
 	scrollbar    tea.Model
+	keys         keyMap
+	help         help.Model
 }
 
 type processErrorMsg struct {
@@ -285,6 +289,9 @@ func (m *Model) View() string {
 			docStyle.Width((m.terminalSize.width - docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(borderColor).Render(m.viewport.View()),
 		)
 	}
+	helpView := m.help.View(m.keys)
+	doc.WriteString("\n")
+	doc.WriteString(helpView)
 	return windowStyle.Render(doc.String())
 }
 
@@ -316,6 +323,73 @@ func (m *Model) switchTab(direction TabDirection) tea.Cmd {
 	m.scrollbar, cmd = m.scrollbar.Update(m.viewport)
 
 	return cmd
+}
+
+type keyMap struct {
+	Up             key.Binding
+	Down           key.Binding
+	Left           key.Binding
+	Right          key.Binding
+	RestartProcess key.Binding
+	Follow         key.Binding
+	Unfollow       key.Binding
+	ScrollTop      key.Binding
+	Help           key.Binding
+	Quit           key.Binding
+}
+
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Help, k.Quit}
+}
+
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.RestartProcess, k.Follow, k.Unfollow, k.ScrollTop},
+		{k.Up, k.Down, k.Left, k.Right, k.Help, k.Quit},
+	}
+}
+
+var keys = keyMap{
+	Up: key.NewBinding(
+		key.WithKeys("up", "k"),
+		key.WithHelp("↑/k", "move up"),
+	),
+	Down: key.NewBinding(
+		key.WithKeys("down", "j"),
+		key.WithHelp("↓/j", "move down"),
+	),
+	Left: key.NewBinding(
+		key.WithKeys("left", "h"),
+		key.WithHelp("←/h", "move left"),
+	),
+	Right: key.NewBinding(
+		key.WithKeys("right", "l"),
+		key.WithHelp("→/l", "move right"),
+	),
+	RestartProcess: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "restart process"),
+	),
+	Follow: key.NewBinding(
+		key.WithKeys("f"),
+		key.WithHelp("f", "follow"),
+	),
+	Unfollow: key.NewBinding(
+		key.WithKeys("u"),
+		key.WithHelp("u", "unfollow"),
+	),
+	ScrollTop: key.NewBinding(
+		key.WithKeys("t"),
+		key.WithHelp("t", "scroll to top"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "toggle help"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("q", "esc", "ctrl+c"),
+		key.WithHelp("q", "quit"),
+	),
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -358,17 +432,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
-      m.currentTab().Following = false
-    case tea.MouseButtonWheelDown:
-      m.viewport, cmd = m.viewport.Update(msg)
-      cmds = append(cmds, cmd)
-      m.scrollbar, cmd = m.scrollbar.Update(m.viewport)
-      cmds = append(cmds, cmd)
+			m.currentTab().Following = false
+		case tea.MouseButtonWheelDown:
+			m.viewport, cmd = m.viewport.Update(msg)
+			cmds = append(cmds, cmd)
+			m.scrollbar, cmd = m.scrollbar.Update(m.viewport)
+			cmds = append(cmds, cmd)
 
-      // scrolling to the bottom is sticky
-      if m.viewport.AtBottom() {
-        m.currentTab().Following = true
-      }
+			// scrolling to the bottom is sticky
+			if m.viewport.AtBottom() {
+				m.currentTab().Following = true
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -413,7 +487,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 type tickMsg time.Time
 
 func main() {
-	cmd := tea.NewProgram(&Model{}, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	cmd := tea.NewProgram(
+		&Model{
+			keys: keys,
+			help: help.New(),
+		},
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
 
 	go func() {
 		for c := range time.Tick(100 * time.Millisecond) {
