@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blvrd/manifold/scrollbar"
 	"github.com/blvrd/manifold/help"
+	"github.com/blvrd/manifold/scrollbar"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -251,8 +251,8 @@ var (
 	highlightColor   = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
 	borderColor      = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#3e3e3e"}
 	lightText        = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#9f9f9f"}
-	activeTabStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).BorderForeground(highlightColor).Padding(0, 1)
-	inactiveTabStyle = lipgloss.NewStyle().Border(lipgloss.HiddenBorder(), true).Padding(0, 1)
+	activeTabStyle   = lipgloss.NewStyle().MarginRight(2).Bold(true)
+	inactiveTabStyle = lipgloss.NewStyle().MarginRight(2).Foreground(lightText)
 )
 
 func (m *Model) View() string {
@@ -264,14 +264,15 @@ func (m *Model) View() string {
 	var renderedTabs []string
 
 	for i, t := range m.Tabs {
-		var style lipgloss.Style
+		var tabNameStyle lipgloss.Style
 		isActive := i == m.activeTab
 		if isActive {
-			style = activeTabStyle
+			tabNameStyle = activeTabStyle
 		} else {
-			style = inactiveTabStyle
+			tabNameStyle = inactiveTabStyle
 		}
-		renderedTabs = append(renderedTabs, style.Render(t.Name))
+		statusIndicator := lipgloss.NewStyle().MarginRight(1).Foreground(highlightColor).Render("⏺")
+		renderedTabs = append(renderedTabs, lipgloss.JoinHorizontal(lipgloss.Left, statusIndicator, tabNameStyle.Render(t.Name)))
 	}
 
 	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
