@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/blvrd/manifold/scrollbar"
-	"github.com/charmbracelet/bubbles/help"
+	"github.com/blvrd/manifold/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -344,8 +344,11 @@ func (k keyMap) ShortHelp() []key.Binding {
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.RestartProcess, k.Follow, k.Unfollow, k.ScrollTop},
-		{k.Up, k.Down, k.Left, k.Right, k.Help, k.Quit},
+		{k.RestartProcess, k.ScrollTop},
+		{k.Follow, k.Unfollow},
+		{k.Up, k.Down},
+		{k.Left, k.Right},
+		{k.Help, k.Quit},
 	}
 }
 
@@ -398,25 +401,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		switch {
+		case key.Matches(msg, keys.Quit):
 			if err := m.cleanup(); err != nil {
 				log.Errorf("Cleanup error: %v", err)
 			}
 			return m, tea.Quit
-		case "r":
+		case key.Matches(msg, keys.Help):
+			m.help.ShowAll = !m.help.ShowAll
+		case key.Matches(msg, keys.RestartProcess):
 			return m, m.restartProcess(m.activeTab)
-		case "right", "l", "n", "tab":
+		case key.Matches(msg, keys.Right):
 			return m, m.switchTab(TabNext)
-		case "left", "h", "p", "shift+tab":
+		case key.Matches(msg, keys.Left):
 			return m, m.switchTab(TabPrevious)
-		case "f":
+		case key.Matches(msg, keys.Follow):
 			m.currentTab().Following = true
 			return m, nil
-		case "u":
+		case key.Matches(msg, keys.Unfollow):
 			m.currentTab().Following = false
 			return m, nil
-		case "t":
+		case key.Matches(msg, keys.ScrollTop):
 			m.viewport.GotoTop()
 			m.currentTab().Following = false
 			return m, nil
