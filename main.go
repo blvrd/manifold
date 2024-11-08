@@ -68,8 +68,9 @@ func (b *bufferedOutput) String() string {
 }
 
 type Tab struct {
-	name    string
-	YOffset int
+	Name      string
+	YOffset   int
+	Following bool
 }
 
 type Model struct {
@@ -229,11 +230,15 @@ func (m *Model) Init() tea.Cmd {
 
 	var cmds []tea.Cmd
 	for i, c := range m.externalCmds {
-		m.Tabs = append(m.Tabs, &Tab{name: c.name, YOffset: 0})
+		m.Tabs = append(m.Tabs, &Tab{Name: c.name, YOffset: 0})
 		cmds = append(cmds, m.runCmd(i, c.commandStrings))
 		m.TabContent = append(m.TabContent, newBufferedOutput(10000))
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *Model) currentTab() *Tab {
+	return m.Tabs[m.activeTab]
 }
 
 var (
@@ -262,7 +267,7 @@ func (m *Model) View() string {
 		} else {
 			style = inactiveTabStyle
 		}
-		renderedTabs = append(renderedTabs, style.Render(t.name))
+		renderedTabs = append(renderedTabs, style.Render(t.Name))
 	}
 
 	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
@@ -292,7 +297,7 @@ const (
 
 func (m *Model) switchTab(direction TabDirection) tea.Cmd {
 	// save the current tab's offset
-	m.Tabs[m.activeTab].YOffset = m.viewport.YOffset
+	m.currentTab().YOffset = m.viewport.YOffset
 
 	// calculate the new tab index with wrapping
 	numTabs := len(m.Tabs)
@@ -304,7 +309,7 @@ func (m *Model) switchTab(direction TabDirection) tea.Cmd {
 
 	// restore the tab's y-offset, careful not do go over the max offset
 	maxOffset := max(0, m.viewport.TotalLineCount()-m.viewport.Height)
-	m.viewport.YOffset = clamp(m.Tabs[m.activeTab].YOffset, 0, maxOffset)
+	m.viewport.YOffset = clamp(m.currentTab().YOffset, 0, maxOffset)
 
 	// immediately update the scrollbar
 	var cmd tea.Cmd
