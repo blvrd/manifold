@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -24,15 +25,57 @@ type size struct {
 	height int
 }
 
+type bufferedOutput struct {
+	maxLines int
+	lines    []string
+	mu       sync.Mutex
+}
+
+func newBufferedOutput(maxLines int) *bufferedOutput {
+	return &bufferedOutput{
+		maxLines: maxLines,
+		lines:    make([]string, 0, maxLines),
+	}
+}
+
+func (b *bufferedOutput) Write(p []byte) (n int, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	text := string(p)
+	lines := strings.Split(text, "\n")
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		if len(b.lines) >= b.maxLines {
+			b.lines = b.lines[1:]
+		}
+		b.lines = append(b.lines, line)
+	}
+
+	return len(p), nil
+}
+
+func (b *bufferedOutput) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return strings.Join(b.lines, "\n")
+}
+
 type Model struct {
 	content      strings.Builder
 	ready        bool
 	viewport     viewport.Model
 	Tabs         []string
-	TabContent   []strings.Builder
+	TabContent   []*bufferedOutput
 	activeTab    int
 	externalCmds []externalCmd
 	runningCmds  map[int]*exec.Cmd
+	cmdsMutex    sync.Mutex
 	terminalSize size
 }
 
@@ -48,22 +91,27 @@ type processExitMsg struct {
 
 func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 	return func() tea.Msg {
+		m.cmdsMutex.Lock()
 		if m.runningCmds == nil {
 			m.runningCmds = make(map[int]*exec.Cmd)
 		}
 
 		if cmd, exists := m.runningCmds[tabIndex]; exists && cmd != nil && cmd.Process != nil {
+			m.cmdsMutex.Unlock()
 			m.killProcess(tabIndex)
+			m.cmdsMutex.Lock()
 		}
 
 		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
 		stdout, _ := cmd.StdoutPipe()
 
 		if err := cmd.Start(); err != nil {
+			m.cmdsMutex.Unlock()
 			return processErrorMsg{tabIndex: tabIndex, err: err}
 		}
 
 		m.runningCmds[tabIndex] = cmd
+		m.cmdsMutex.Unlock()
 
 		go func() {
 			buf := make([]byte, 1024)
@@ -81,7 +129,10 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 }
 
 func (m *Model) killProcess(tabIndex int) error {
+	m.cmdsMutex.Lock()
 	cmd, exists := m.runningCmds[tabIndex]
+	m.cmdsMutex.Unlock()
+
 	if !exists || cmd == nil || cmd.Process == nil {
 		return nil
 	}
@@ -97,13 +148,18 @@ func (m *Model) killProcess(tabIndex int) error {
 
 	select {
 	case err := <-done:
+		m.cmdsMutex.Lock()
 		delete(m.runningCmds, tabIndex)
+		m.cmdsMutex.Unlock()
 		return err
 	case <-time.After(3 * time.Second):
 		if err := cmd.Process.Kill(); err != nil {
 			return fmt.Errorf("failed to kill process %d: %v", tabIndex, err)
 		}
+		<-done
+		m.cmdsMutex.Lock()
 		delete(m.runningCmds, tabIndex)
+		m.cmdsMutex.Unlock()
 		return fmt.Errorf("process %d killed after timeout", tabIndex)
 	}
 }
@@ -113,11 +169,19 @@ func (m *Model) cleanup() error {
 	done := make(chan bool)
 
 	go func() {
+		m.cmdsMutex.Lock()
+		tabs := make([]int, 0, len(m.runningCmds))
 		for tabIndex := range m.runningCmds {
+			tabs = append(tabs, tabIndex)
+		}
+		m.cmdsMutex.Unlock()
+
+		for _, tabIndex := range tabs {
 			if err := m.killProcess(tabIndex); err != nil {
 				errors = append(errors, fmt.Errorf("tab %d: %w", tabIndex, err))
 			}
 		}
+
 		done <- true
 	}()
 
@@ -160,7 +224,7 @@ func (m *Model) Init() tea.Cmd {
 	for i, c := range m.externalCmds {
 		m.Tabs = append(m.Tabs, c.name)
 		cmds = append(cmds, m.runCmd(i, c.commandStrings))
-		m.TabContent = append(m.TabContent, strings.Builder{})
+		m.TabContent = append(m.TabContent, newBufferedOutput(1000))
 	}
 	return tea.Batch(cmds...)
 }
@@ -239,12 +303,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case processErrorMsg:
 		if msg.err != nil {
 			log.Errorf("Process error on tab %d: %v", msg.tabIndex, msg.err)
-			m.TabContent[msg.tabIndex].WriteString(fmt.Sprintf("\nError: %v\n", msg.err))
+			m.TabContent[msg.tabIndex].Write([]byte(fmt.Sprintf("\nError: %v\n", msg.err)))
 		}
 	case processExitMsg:
 		if msg.err != nil {
 			log.Warnf("Process on tab %d exited with error: %v", msg.tabIndex, msg.err)
-			m.TabContent[msg.tabIndex].WriteString(fmt.Sprintf("\nProcess exited %v\n", msg.err))
+			m.TabContent[msg.tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited %v\n", msg.err)))
 		}
 		delete(m.runningCmds, msg.tabIndex)
 	}
