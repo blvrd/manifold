@@ -339,6 +339,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "f":
 			m.currentTab().Following = true
 			return m, nil
+		case "u":
+			m.currentTab().Following = false
+			return m, nil
 		}
 
 	case tickMsg:
