@@ -41,7 +41,7 @@ func newBufferedOutput(maxLines int) *bufferedOutput {
 	}
 }
 
-func (b *bufferedOutput) Write(p []byte) (n int, err error) {
+func (b *bufferedOutput) Write(p []byte, tabIndex int, m *Model) (n int, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -59,6 +59,9 @@ func (b *bufferedOutput) Write(p []byte) (n int, err error) {
 		b.lines = append(b.lines, line)
 	}
 
+	m.Tabs[tabIndex].LastOutput = time.Now()
+	m.Tabs[tabIndex].Status = ProcessStreaming
+
 	return len(p), nil
 }
 
@@ -70,9 +73,11 @@ func (b *bufferedOutput) String() string {
 }
 
 type Tab struct {
-	Name      string
-	YOffset   int
-	Following bool
+	Name       string
+	YOffset    int
+	Following  bool
+	Status     ProcessStatus
+	LastOutput time.Time
 }
 
 type Model struct {
@@ -101,6 +106,14 @@ type processExitMsg struct {
 	err      error
 }
 
+type ProcessStatus int
+
+const (
+	ProcessStreaming ProcessStatus = iota
+	ProcessPaused
+	ProcessError
+)
+
 func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 	return func() tea.Msg {
 		m.cmdsMutex.Lock()
@@ -119,10 +132,12 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 
 		if err := cmd.Start(); err != nil {
 			m.cmdsMutex.Unlock()
+			m.Tabs[tabIndex].Status = ProcessError
 			return processErrorMsg{tabIndex: tabIndex, err: err}
 		}
 
 		m.runningCmds[tabIndex] = cmd
+		m.Tabs[tabIndex].Status = ProcessStreaming
 		m.cmdsMutex.Unlock()
 
 		go func() {
@@ -132,7 +147,15 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 				if err != nil {
 					break
 				}
-				m.TabContent[tabIndex].Write(buf[:n])
+				m.TabContent[tabIndex].Write(buf[:n], tabIndex, m)
+			}
+
+			if err := cmd.Wait(); err != nil {
+				m.cmdsMutex.Lock()
+				delete(m.runningCmds, tabIndex)
+				m.cmdsMutex.Unlock()
+				m.TabContent[tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited with error: %v\n", err)), tabIndex, m)
+				m.Tabs[tabIndex].Status = ProcessError
 			}
 		}()
 
@@ -271,7 +294,18 @@ func (m *Model) View() string {
 		} else {
 			tabNameStyle = inactiveTabStyle
 		}
-		statusIndicator := lipgloss.NewStyle().MarginRight(1).Foreground(highlightColor).Render("⏺")
+
+		var dotColor lipgloss.Color
+		switch t.Status {
+		case ProcessStreaming:
+			dotColor = lipgloss.Color("#2ecc71")
+		case ProcessPaused:
+			dotColor = lipgloss.Color("#f1c40f")
+		case ProcessError:
+			dotColor = lipgloss.Color("#e74c3c")
+		}
+
+		statusIndicator := lipgloss.NewStyle().MarginRight(1).Foreground(dotColor).Render("⏺")
 		renderedTabs = append(renderedTabs, lipgloss.JoinHorizontal(lipgloss.Left, statusIndicator, tabNameStyle.Render(t.Name)))
 	}
 
@@ -432,6 +466,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.currentTab().Following {
 			m.viewport.GotoBottom()
 		}
+
+		// check for paused processes
+		now := time.Now()
+
+		for i, tab := range m.Tabs {
+			m.cmdsMutex.Lock()
+			cmd, running := m.runningCmds[i]
+			m.cmdsMutex.Unlock()
+
+			if running && cmd != nil && cmd.Process != nil {
+				if tab.Status != ProcessError && now.Sub(tab.LastOutput) > 3*time.Second {
+					tab.Status = ProcessPaused
+				}
+			}
+		}
 	case tea.MouseMsg:
 		if msg.Action != tea.MouseActionPress {
 			break
@@ -472,12 +521,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case processErrorMsg:
 		if msg.err != nil {
 			log.Errorf("Process error on tab %d: %v", msg.tabIndex, msg.err)
-			m.TabContent[msg.tabIndex].Write([]byte(fmt.Sprintf("\nError: %v\n", msg.err)))
+			m.TabContent[msg.tabIndex].Write(
+				[]byte(fmt.Sprintf("\nError: %v\n", msg.err)),
+				m.activeTab,
+				m,
+			)
+			m.Tabs[msg.tabIndex].Status = ProcessError
 		}
 	case processExitMsg:
 		if msg.err != nil {
 			log.Warnf("Process on tab %d exited with error: %v", msg.tabIndex, msg.err)
-			m.TabContent[msg.tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited %v\n", msg.err)))
+			m.TabContent[msg.tabIndex].Write(
+				[]byte(fmt.Sprintf("\nProcess exited %v\n", msg.err)),
+				m.activeTab,
+				m,
+			)
 		}
 		delete(m.runningCmds, msg.tabIndex)
 	}
