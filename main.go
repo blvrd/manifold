@@ -67,11 +67,16 @@ func (b *bufferedOutput) String() string {
 	return strings.Join(b.lines, "\n")
 }
 
+type Tab struct {
+	name    string
+	YOffset int
+}
+
 type Model struct {
 	content      strings.Builder
 	ready        bool
 	viewport     viewport.Model
-	Tabs         []string
+	Tabs         []*Tab
 	TabContent   []*bufferedOutput
 	activeTab    int
 	externalCmds []externalCmd
@@ -224,7 +229,7 @@ func (m *Model) Init() tea.Cmd {
 
 	var cmds []tea.Cmd
 	for i, c := range m.externalCmds {
-		m.Tabs = append(m.Tabs, c.name)
+		m.Tabs = append(m.Tabs, &Tab{name: c.name, YOffset: 0})
 		cmds = append(cmds, m.runCmd(i, c.commandStrings))
 		m.TabContent = append(m.TabContent, newBufferedOutput(10000))
 	}
@@ -257,7 +262,7 @@ func (m *Model) View() string {
 		} else {
 			style = inactiveTabStyle
 		}
-		renderedTabs = append(renderedTabs, style.Render(t))
+		renderedTabs = append(renderedTabs, style.Render(t.name))
 	}
 
 	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
@@ -278,6 +283,36 @@ func (m *Model) View() string {
 	return windowStyle.Render(doc.String())
 }
 
+type TabDirection int
+
+const (
+	TabPrevious TabDirection = -1
+	TabNext     TabDirection = 1
+)
+
+func (m *Model) switchTab(direction TabDirection) tea.Cmd {
+	// save the current tab's offset
+	m.Tabs[m.activeTab].YOffset = m.viewport.YOffset
+
+	// calculate the new tab index with wrapping
+	numTabs := len(m.Tabs)
+	newIndex := (m.activeTab + int(direction) + numTabs) % numTabs
+	m.activeTab = newIndex
+
+	// update the viewport content before restoring the tab's y-offset
+	m.viewport.SetContent(m.TabContent[m.activeTab].String())
+
+	// restore the tab's y-offset, careful not do go over the max offset
+	maxOffset := max(0, m.viewport.TotalLineCount()-m.viewport.Height)
+	m.viewport.YOffset = clamp(m.Tabs[m.activeTab].YOffset, 0, maxOffset)
+
+	// immediately update the scrollbar
+	var cmd tea.Cmd
+	m.scrollbar, cmd = m.scrollbar.Update(m.viewport)
+
+	return cmd
+}
+
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
@@ -293,11 +328,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			return m, m.restartProcess(m.activeTab)
 		case "right", "l", "n", "tab":
-			m.activeTab = min(m.activeTab+1, len(m.Tabs)-1)
-			return m, nil
+			return m, m.switchTab(TabNext)
 		case "left", "h", "p", "shift+tab":
-			m.activeTab = max(m.activeTab-1, 0)
-			return m, nil
+			return m, m.switchTab(TabPrevious)
 		}
 
 	case tickMsg:
@@ -371,6 +404,13 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func clamp(v, low, high int) int {
+	if high < low {
+		low, high = high, low
+	}
+	return min(high, max(low, v))
 }
 
 func parseProcfile(filepath string) ([]externalCmd, error) {
