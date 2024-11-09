@@ -153,7 +153,7 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 			return processErrorMsg{tabIndex: tabIndex, err: err}
 		}
 
-    tty.Close()
+		tty.Close()
 
 		log.Debug("process started successfully", "tab", tabIndex, "pid", cmd.Process.Pid)
 
@@ -162,7 +162,7 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 		m.cmdsMutex.Unlock()
 
 		go func() {
-      defer ptmx.Close()
+			defer ptmx.Close()
 			scanner := bufio.NewScanner(ptmx)
 			for scanner.Scan() {
 				line := scanner.Bytes()
@@ -513,29 +513,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-	case tea.MouseMsg:
-		if msg.Action != tea.MouseActionPress {
-			break
-		}
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
-			m.currentTab().Following = false
-		case tea.MouseButtonWheelDown:
-			m.viewport, cmd = m.viewport.Update(msg)
-			cmds = append(cmds, cmd)
-			m.scrollbar, cmd = m.scrollbar.Update(m.viewport)
-			cmds = append(cmds, cmd)
-
-			// scrolling to the bottom is sticky
-			if m.viewport.AtBottom() {
-				m.currentTab().Following = true
-			}
-		}
-
 	case tea.WindowSizeMsg:
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width-20, msg.Height-20)
-			// TrackStyle: lipgloss.NewStyle().SetString("│"),
 			m.scrollbar = scrollbar.NewVertical(
 				scrollbar.WithThumbStyle(lipgloss.NewStyle().Foreground(highlightColor).SetString("┃")),
 				scrollbar.WithTrackStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).SetString("│")),
@@ -589,7 +569,6 @@ func main() {
 			help: help.New(),
 		},
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 	)
 
 	go func() {
