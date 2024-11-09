@@ -18,4 +18,6 @@ For the little colored dots next to each tab:
 - yellow means the process is still running
 - red means the process exited with am error (non-zero status code)
 
+I'm not sure how I feel about these and might change them or rip them out entirely.
+
 I'd love some feedback! Does this work as a drop-in replacement for Overmind? Does it suck?
