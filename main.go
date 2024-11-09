@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -116,6 +117,7 @@ const (
 
 func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 	return func() tea.Msg {
+		log.Debug("starting command execution", "tab", tabIndex, "cmd", commandStrings)
 		m.cmdsMutex.Lock()
 		if m.runningCmds == nil {
 			m.runningCmds = make(map[int]*exec.Cmd)
@@ -128,9 +130,22 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 		}
 
 		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
-		stdout, _ := cmd.StdoutPipe()
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			log.Error("failed to create stdout pipe", "error", err)
+			m.cmdsMutex.Unlock()
+			return processErrorMsg{tabIndex: tabIndex, err: err}
+		}
+
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			log.Error("failed to create stderr pipe", "error", err)
+			m.cmdsMutex.Unlock()
+			return processErrorMsg{tabIndex: tabIndex, err: err}
+		}
 
 		if err := cmd.Start(); err != nil {
+			log.Error("failed to start command", "error", err)
 			m.cmdsMutex.Unlock()
 			m.Tabs[tabIndex].Status = ProcessError
 			return processErrorMsg{tabIndex: tabIndex, err: err}
@@ -141,12 +156,19 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 		m.cmdsMutex.Unlock()
 
 		go func() {
+			reader := io.MultiReader(stdout, stderr)
 			buf := make([]byte, 1024)
 			for {
-				n, err := stdout.Read(buf)
+				n, err := reader.Read(buf)
 				if err != nil {
+					if err != io.EOF {
+						log.Error("error reading from pipes", "error", err)
+					} else {
+						log.Debug("reached EOF on pipes")
+					}
 					break
 				}
+				log.Debug("read from pipes", "bytes", n, "content", string(buf[:n]))
 				m.TabContent[tabIndex].Write(buf[:n], tabIndex, m)
 			}
 
