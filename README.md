@@ -1,6 +1,10 @@
 # Manifold
 
-Manifold runs your stuff. It's directly inspired by , [Solo](https://github.com/aarondfrancis/solo), [foreman](https://github.com/ddollar/foreman?tab=readme-ov-file), and [Overmind](https://github.com/DarthSim/overmind).
+Manifold runs your stuff. It's directly inspired by , [Solo](https://github.com/aarondfrancis/solo), [foreman](https://github.com/ddollar/foreman?tab=readme-ov-file), and [Overmind](https://github.com/DarthSim/overmind). Here's my problem with all of them:
+
+- Solo is for PHP/Laravel only. That's no fun.
+- Foreman doesn't allow me to start/restart/stop processes independently
+- Overmind relies on tmux and I don't feel like depending on tmux - I want something standalone
 
 ## Installation
 
@@ -15,7 +19,7 @@ Run `manifold` (if it's on your path) or `./manifold` (if you it's in your proje
 For the little colored dots next to each tab:
 
 - green means that the tab is currently reading output from the process
-- yellow means the process is still running
+- yellow means the process is no longer producing output
 - red means the process exited with am error (non-zero status code)
 
 I'm not sure how I feel about these and might change them or rip them out entirely.
