@@ -131,12 +131,6 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 
 		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
 
-		cmd.Env = append(os.Environ(),
-			"FORCE_COLOR=1",
-			"COLORTERM=truecolor",
-			"TERM=xterm-256color",
-		)
-
 		ptmx, tty, err := pty.Open()
 		if err != nil {
 			log.Error("failed to open pty", "error", err)
