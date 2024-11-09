@@ -1,6 +1,6 @@
 # Manifold
 
-Manifold runs your stuff. It's directly inspired by , [Solo](https://github.com/aarondfrancis/solo), [foreman](https://github.com/ddollar/foreman?tab=readme-ov-file), and [Overmind](https://github.com/DarthSim/overmind). Here's my problem with all of them:
+Manifold runs your stuff. It's directly inspired by [Solo](https://github.com/aarondfrancis/solo), [foreman](https://github.com/ddollar/foreman?tab=readme-ov-file), and [Overmind](https://github.com/DarthSim/overmind). Here's my problem with all of them:
 
 - Solo is for PHP/Laravel only. That's no fun.
 - Foreman doesn't allow me to start/restart/stop processes independently
