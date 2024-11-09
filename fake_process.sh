@@ -38,7 +38,7 @@ while true; do
     color="${COLORS[$random_color_index]}"
 
     # Print timestamp and colored message
-    echo -e "${color}$(date '+%Y-%m-%d %H:%M:%S') - $message${RESET}"
+    echo -e "$(date '+%Y-%m-%d %H:%M:%S') - $message"
 
     # Sleep for 1 second
     sleep 0.1
