@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
+	"github.com/creack/pty"
 )
 
 type externalCmd struct {
@@ -130,19 +130,21 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 		}
 
 		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
-		stdout, err := cmd.StdoutPipe()
+
+		cmd.Env = append(os.Environ(),
+			"FORCE_COLOR=1",
+			"COLORTERM=truecolor",
+			"TERM=xterm-256color",
+		)
+
+		ptmx, tty, err := pty.Open()
 		if err != nil {
-			log.Error("failed to create stdout pipe", "error", err)
-			m.cmdsMutex.Unlock()
-			return processErrorMsg{tabIndex: tabIndex, err: err}
+			log.Error("failed to open pty", "error", err)
 		}
 
-		stderr, err := cmd.StderrPipe()
-		if err != nil {
-			log.Error("failed to create stderr pipe", "error", err)
-			m.cmdsMutex.Unlock()
-			return processErrorMsg{tabIndex: tabIndex, err: err}
-		}
+		cmd.Stdout = tty
+		cmd.Stderr = tty
+		cmd.Stdin = tty
 
 		if err := cmd.Start(); err != nil {
 			log.Error("failed to start command", "error", err)
@@ -151,33 +153,41 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 			return processErrorMsg{tabIndex: tabIndex, err: err}
 		}
 
+    tty.Close()
+
+		log.Debug("process started successfully", "tab", tabIndex, "pid", cmd.Process.Pid)
+
 		m.runningCmds[tabIndex] = cmd
 		m.Tabs[tabIndex].Status = ProcessStreaming
 		m.cmdsMutex.Unlock()
 
 		go func() {
-			reader := io.MultiReader(stdout, stderr)
-			buf := make([]byte, 1024)
-			for {
-				n, err := reader.Read(buf)
-				if err != nil {
-					if err != io.EOF {
-						log.Error("error reading from pipes", "error", err)
-					} else {
-						log.Debug("reached EOF on pipes")
-					}
-					break
-				}
-				log.Debug("read from pipes", "bytes", n, "content", string(buf[:n]))
-				m.TabContent[tabIndex].Write(buf[:n], tabIndex, m)
+      defer ptmx.Close()
+			scanner := bufio.NewScanner(ptmx)
+			for scanner.Scan() {
+				line := scanner.Bytes()
+				log.Debug("pty received", "tab", tabIndex, "content", string(line))
+				m.TabContent[tabIndex].Write(append(line, '\n'), tabIndex, m)
 			}
 
+			if err := scanner.Err(); err != nil {
+				log.Error("pty scanner error", "tab", tabIndex, "error", err)
+				m.TabContent[tabIndex].Write([]byte(fmt.Sprintf("\nPTY error: %v\n", err)), tabIndex, m)
+			}
+			log.Debug("pty scanner finished", "tab", tabIndex)
+
 			if err := cmd.Wait(); err != nil {
+				log.Error("process exited with error", "tab", tabIndex, "error", err)
 				m.cmdsMutex.Lock()
 				delete(m.runningCmds, tabIndex)
 				m.cmdsMutex.Unlock()
 				m.TabContent[tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited with error: %v\n", err)), tabIndex, m)
 				m.Tabs[tabIndex].Status = ProcessError
+			} else {
+				log.Debug("process exited successfully", "tab", tabIndex)
+				m.cmdsMutex.Lock()
+				delete(m.runningCmds, tabIndex)
+				m.cmdsMutex.Unlock()
 			}
 		}()
 

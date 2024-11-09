@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.2.0
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/charmbracelet/log v0.4.0
+	github.com/creack/pty v1.1.24
 )
 
 require (
