@@ -401,6 +401,7 @@ type keyMap struct {
 	Follow         key.Binding
 	Unfollow       key.Binding
 	ScrollTop      key.Binding
+	ScrollBottom   key.Binding
 	Help           key.Binding
 	Quit           key.Binding
 }
@@ -452,6 +453,10 @@ var keys = keyMap{
 		key.WithKeys("t"),
 		key.WithHelp("t", "scroll to top"),
 	),
+	ScrollBottom: key.NewBinding(
+		key.WithKeys("b"),
+		key.WithHelp("b", "scroll to bottom"),
+	),
 	Help: key.NewBinding(
 		key.WithKeys("?"),
 		key.WithHelp("?", "toggle help"),
@@ -491,6 +496,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.ScrollTop):
 			m.viewport.GotoTop()
 			m.currentTab().Following = false
+			return m, nil
+		case key.Matches(msg, keys.ScrollBottom):
+			m.viewport.GotoBottom()
 			return m, nil
 		}
 	case tickMsg:
