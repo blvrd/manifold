@@ -75,7 +75,6 @@ type TabStatus int
 const (
 	StatusNone TabStatus = iota
 	StatusStreaming
-	StatusPaused
 	StatusError
 )
 
