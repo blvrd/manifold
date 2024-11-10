@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/blvrd/manifold/help"
@@ -183,6 +184,8 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 		}
 
 		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
+		// set up a new process group to be identified later
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 		ptmx, tty, err := pty.Open()
 		if err != nil {
@@ -213,15 +216,15 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 			scanner := bufio.NewScanner(ptmx)
 			for scanner.Scan() {
 				line := scanner.Bytes()
-				log.Debug("pty received", "tab", tabIndex, "content", string(line))
+				// log.Debug("pty received", "tab", tabIndex, "content", string(line))
 				m.tabs[tabIndex].Write(append(line, '\n'))
 			}
 
 			if err := scanner.Err(); err != nil {
-				log.Error("pty scanner error", "tab", tabIndex, "error", err)
+				// log.Error("pty scanner error", "tab", tabIndex, "error", err)
 				m.tabs[tabIndex].Write([]byte(fmt.Sprintf("\nPTY error: %v\n", err)))
 			}
-			log.Debug("pty scanner finished", "tab", tabIndex)
+			// log.Debug("pty scanner finished", "tab", tabIndex)
 
 			if err := cmd.Wait(); err != nil {
 				log.Error("process exited with error", "tab", tabIndex, "error", err)
@@ -246,37 +249,35 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 func (m *Model) killProcess(tabIndex int) error {
 	m.cmdsMutex.Lock()
 	cmd, exists := m.runningCmds[tabIndex]
-	m.cmdsMutex.Unlock()
-
 	if !exists || cmd == nil || cmd.Process == nil {
+		m.cmdsMutex.Unlock()
 		return nil
 	}
+	pid := cmd.Process.Pid
+	m.cmdsMutex.Unlock()
 
-	if err := cmd.Process.Signal(os.Interrupt); err != nil {
-		log.Warnf("Failed to send SIGRTERM to process %d: %v", tabIndex, err)
+	log.Debug("killing process", "tab", tabIndex, "pid", pid)
+
+	// Send SIGINT to the process group
+	if err := syscall.Kill(-pid, syscall.SIGINT); err != nil {
+		log.Debug("failed to kill process group", "error", err)
+		return fmt.Errorf("failed to kill process %d: %v", tabIndex, err)
 	}
 
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case err := <-done:
-		m.cmdsMutex.Lock()
-		delete(m.runningCmds, tabIndex)
-		m.cmdsMutex.Unlock()
-		return err
-	case <-time.After(3 * time.Second):
-		if err := cmd.Process.Kill(); err != nil {
-			return fmt.Errorf("failed to kill process %d: %v", tabIndex, err)
+	// Wait for process to actually terminate
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err != nil {
+			// Process is gone
+			log.Debug("process terminated", "pid", pid)
+			return nil
 		}
-		<-done
-		m.cmdsMutex.Lock()
-		delete(m.runningCmds, tabIndex)
-		m.cmdsMutex.Unlock()
-		return fmt.Errorf("process %d killed after timeout", tabIndex)
+		time.Sleep(50 * time.Millisecond)
 	}
+
+	// If we get here, process didn't terminate gracefully
+	log.Debug("process failed to terminate gracefully, forcing kill", "pid", pid)
+	return syscall.Kill(-pid, syscall.SIGKILL)
 }
 
 func (m *Model) cleanup() error {
