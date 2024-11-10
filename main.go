@@ -75,6 +75,7 @@ type TabStatus int
 const (
 	StatusNone TabStatus = iota
 	StatusStreaming
+	StatusSuccess
 	StatusError
 )
 
@@ -234,6 +235,7 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 				m.cmdsMutex.Lock()
 				delete(m.runningCmds, tabIndex)
 				m.cmdsMutex.Unlock()
+				m.tabs[tabIndex].SetStatus(StatusSuccess)
 			}
 		}()
 
@@ -408,6 +410,8 @@ func (m *Model) View() string {
 			var dotColor lipgloss.Color
 			switch status {
 			case StatusStreaming:
+				dotColor = lipgloss.Color("#3498db")
+			case StatusSuccess:
 				dotColor = lipgloss.Color("#2ecc71")
 			case StatusError:
 				dotColor = lipgloss.Color("#e74c3c")
