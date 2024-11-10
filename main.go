@@ -71,6 +71,13 @@ func (b *bufferedOutput) String() string {
 	return strings.Join(b.lines, "\n")
 }
 
+func (b *bufferedOutput) Clear() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.lines = []string{}
+}
+
 type TabStatus int
 
 const (
@@ -83,6 +90,7 @@ const (
 type Tab interface {
 	Name() string
 	Content() string
+	Clear()
 	SetStatus(TabStatus)
 	Status() TabStatus
 	YOffset() int
@@ -112,6 +120,7 @@ func NewProcessTab(name string, commandStrings []string) *ProcessTab {
 
 func (p *ProcessTab) Name() string             { return p.name }
 func (p *ProcessTab) Content() string          { return p.buffer.String() }
+func (p *ProcessTab) Clear()                   { p.buffer.Clear() }
 func (p *ProcessTab) Status() TabStatus        { return p.status }
 func (p *ProcessTab) SetStatus(s TabStatus)    { p.status = s }
 func (p *ProcessTab) YOffset() int             { return p.yOffset }
@@ -140,6 +149,7 @@ func (h *HelpTab) SetYOffset(y int)         { h.yOffset = y }
 func (h *HelpTab) Following() bool          { return false }
 func (h *HelpTab) SetFollowing(bool)        { /* noop */ }
 func (h *HelpTab) CommandStrings() []string { return nil }
+func (h *HelpTab) Clear()                   {}
 
 func (h *HelpTab) Write(b []byte) (int, error) {
 	h.content = string(b)
@@ -502,6 +512,7 @@ type keyMap struct {
 	Left           key.Binding
 	Right          key.Binding
 	RestartProcess key.Binding
+	Clear          key.Binding
 	Follow         key.Binding
 	Unfollow       key.Binding
 	ScrollTop      key.Binding
@@ -543,6 +554,10 @@ var keys = keyMap{
 	RestartProcess: key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("r", "restart process"),
+	),
+	Clear: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "clear"),
 	),
 	Follow: key.NewBinding(
 		key.WithKeys("f"),
@@ -587,6 +602,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.switchToLastTab()
 		case key.Matches(msg, keys.RestartProcess):
 			return m, m.restartProcess(m.activeTab)
+		case key.Matches(msg, keys.Clear):
+			m.currentTab().Clear()
+			return m, nil
 		case key.Matches(msg, keys.Right):
 			return m, m.switchTab(TabNext)
 		case key.Matches(msg, keys.Left):
