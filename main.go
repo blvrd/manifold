@@ -256,6 +256,7 @@ func (m *Model) killProcess(tabIndex int) error {
 	pid := cmd.Process.Pid
 	m.cmdsMutex.Unlock()
 
+	start := time.Now()
 	log.Debug("killing process", "tab", tabIndex, "pid", pid)
 
 	// Send SIGINT to the process group
@@ -275,8 +276,7 @@ func (m *Model) killProcess(tabIndex int) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// If we get here, process didn't terminate gracefully
-	log.Debug("process failed to terminate gracefully, forcing kill", "pid", pid)
+	log.Debug("process failed to terminate gracefully, forcing kill", "pid", pid, "duration", time.Since(start))
 	return syscall.Kill(-pid, syscall.SIGKILL)
 }
 
@@ -291,6 +291,9 @@ func (m *Model) cleanup() error {
 			tabs = append(tabs, tabIndex)
 		}
 		m.cmdsMutex.Unlock()
+		start := time.Now()
+
+		log.Debug("starting cleanup", "process_count", len(tabs))
 
 		for _, tabIndex := range tabs {
 			if err := m.killProcess(tabIndex); err != nil {
@@ -298,6 +301,7 @@ func (m *Model) cleanup() error {
 			}
 		}
 
+		log.Debug("cleanup completed", "duration", time.Since(start), "error_count", len(errors))
 		done <- true
 	}()
 
@@ -306,8 +310,8 @@ func (m *Model) cleanup() error {
 		if len(errors) > 0 {
 			return fmt.Errorf("cleanup errors: %v", errors)
 		}
-	case <-time.After(10 * time.Second):
-		return fmt.Errorf("cleanup timed out after 10 seconds")
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("cleanup timed out after 5 seconds")
 	}
 
 	return nil
