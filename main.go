@@ -96,7 +96,6 @@ type ProcessTab struct {
 	yOffset        int
 	following      bool
 	status         TabStatus
-	lastOutput     time.Time
 	buffer         *bufferedOutput
 	commandStrings []string
 }
