@@ -89,6 +89,7 @@ type Tab interface {
 	Following() bool
 	SetFollowing(bool)
 	Write([]byte) (int, error)
+	CommandStrings() []string
 }
 
 type ProcessTab struct {
@@ -109,14 +110,15 @@ func NewProcessTab(name string, commandStrings []string) *ProcessTab {
 	}
 }
 
-func (p *ProcessTab) Name() string          { return p.name }
-func (p *ProcessTab) Content() string       { return p.buffer.String() }
-func (p *ProcessTab) Status() TabStatus     { return p.status }
-func (p *ProcessTab) SetStatus(s TabStatus) { p.status = s }
-func (p *ProcessTab) YOffset() int          { return p.yOffset }
-func (p *ProcessTab) SetYOffset(y int)      { p.yOffset = y }
-func (p *ProcessTab) Following() bool       { return p.following }
-func (p *ProcessTab) SetFollowing(f bool)   { p.following = f }
+func (p *ProcessTab) Name() string             { return p.name }
+func (p *ProcessTab) Content() string          { return p.buffer.String() }
+func (p *ProcessTab) Status() TabStatus        { return p.status }
+func (p *ProcessTab) SetStatus(s TabStatus)    { p.status = s }
+func (p *ProcessTab) YOffset() int             { return p.yOffset }
+func (p *ProcessTab) SetYOffset(y int)         { p.yOffset = y }
+func (p *ProcessTab) Following() bool          { return p.following }
+func (p *ProcessTab) SetFollowing(f bool)      { p.following = f }
+func (p *ProcessTab) CommandStrings() []string { return p.commandStrings }
 
 func (p *ProcessTab) Write(b []byte) (int, error) {
 	p.status = StatusStreaming
@@ -129,14 +131,15 @@ type HelpTab struct {
 	content string
 }
 
-func (h *HelpTab) Name() string        { return h.name }
-func (h *HelpTab) Content() string     { return h.content }
-func (h *HelpTab) Status() TabStatus   { return StatusNone }
-func (h *HelpTab) SetStatus(TabStatus) { /* noop */ }
-func (h *HelpTab) YOffset() int        { return h.yOffset }
-func (h *HelpTab) SetYOffset(y int)    { h.yOffset = y }
-func (h *HelpTab) Following() bool     { return false }
-func (h *HelpTab) SetFollowing(bool)   { /* noop */ }
+func (h *HelpTab) Name() string             { return h.name }
+func (h *HelpTab) Content() string          { return h.content }
+func (h *HelpTab) Status() TabStatus        { return StatusNone }
+func (h *HelpTab) SetStatus(TabStatus)      { /* noop */ }
+func (h *HelpTab) YOffset() int             { return h.yOffset }
+func (h *HelpTab) SetYOffset(y int)         { h.yOffset = y }
+func (h *HelpTab) Following() bool          { return false }
+func (h *HelpTab) SetFollowing(bool)        { /* noop */ }
+func (h *HelpTab) CommandStrings() []string { return nil }
 
 func (h *HelpTab) Write(b []byte) (int, error) {
 	h.content = string(b)
@@ -423,7 +426,9 @@ func (m *Model) View() string {
 	doc.WriteString(row)
 	doc.WriteString("\n")
 
-	// doc.WriteString(lipgloss.NewStyle().Foreground(lightText).Render(fmt.Sprintf("Running: %s", strings.Join(m.externalCmds[m.activeTab].commandStrings, " "))))
+	if len(m.currentTab().CommandStrings()) > 0 {
+		doc.WriteString(lipgloss.NewStyle().Foreground(lightText).Render(fmt.Sprintf("Running: %s", strings.Join(m.currentTab().CommandStrings(), " "))))
+	}
 	doc.WriteString("\n")
 	if m.viewport.TotalLineCount() > m.viewport.VisibleLineCount() {
 		doc.WriteString(
