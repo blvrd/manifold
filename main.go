@@ -379,6 +379,11 @@ func (m *Model) currentTab() Tab {
 func (m *Model) getHelpContent() string {
 	var content strings.Builder
 
+  content.WriteString("Manifold\n")
+  content.WriteString("========\n\n")
+  content.WriteString("Manifold is a simple, Procfile-based process manager. For each process defined in your Procfile, Manifold will run the process in its own tab.\n")
+  content.WriteString("Each tab has a little colored dot that indicates its status. Blue means the process is still running, green means the process exited with a zero exit code, and red means it exited with a non-zero exit code.\n\n")
+
 	content.WriteString("Keyboard shortcuts: \n\n")
 
 	for _, section := range m.keys.FullHelp() {
