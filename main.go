@@ -705,7 +705,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 type tickMsg time.Time
 
 func main() {
-	procfilePath := flag.String("p", "Procfile.dev", "path to Procfile")
+	procfilePath := flag.String("f", "Procfile.dev", "path to Procfile")
 	flag.Parse()
 
 	if _, err := os.Stat(*procfilePath); os.IsNotExist(err) {
