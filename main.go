@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -167,6 +168,7 @@ type Model struct {
 	scrollbar    tea.Model
 	keys         keyMap
 	help         help.Model
+	procfilePath string
 }
 
 type processErrorMsg struct {
@@ -348,7 +350,7 @@ func (m *Model) Init() tea.Cmd {
 	log.Info("application started")
 
 	m.runningCmds = make(map[int]*exec.Cmd)
-	procfile, err := parseProcfile("./Procfile.dev")
+	procfile, err := parseProcfile(m.procfilePath)
 	if err != nil {
 		panic("couldn't parse procfile")
 	}
@@ -379,10 +381,10 @@ func (m *Model) currentTab() Tab {
 func (m *Model) getHelpContent() string {
 	var content strings.Builder
 
-  content.WriteString("Manifold\n")
-  content.WriteString("========\n\n")
-  content.WriteString("Manifold is a simple, Procfile-based process manager. For each process defined in your Procfile, Manifold will run the process in its own tab.\n")
-  content.WriteString("Each tab has a little colored dot that indicates its status. Blue means the process is still running, green means the process exited with a zero exit code, and red means it exited with a non-zero exit code.\n\n")
+	content.WriteString("Manifold\n")
+	content.WriteString("========\n\n")
+	content.WriteString("Manifold is a simple, Procfile-based process manager. For each process defined in your Procfile, Manifold will run the process in its own tab.\n")
+	content.WriteString("Each tab has a little colored dot that indicates its status. Blue means the process is still running, green means the process exited with a zero exit code, and red means it exited with a non-zero exit code.\n\n")
 
 	content.WriteString("Keyboard shortcuts: \n\n")
 
@@ -532,9 +534,9 @@ func (k keyMap) ShortHelp() []key.Binding {
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-    {k.RestartProcess, k.Clear, k.Follow, k.Unfollow},
-    {k.Up, k.Down, k.Left, k.Right, k.ScrollTop, k.ScrollBottom},
-    {k.Help, k.Quit},
+		{k.RestartProcess, k.Clear, k.Follow, k.Unfollow},
+		{k.Up, k.Down, k.Left, k.Right, k.ScrollTop, k.ScrollBottom},
+		{k.Help, k.Quit},
 	}
 }
 
@@ -674,10 +676,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 type tickMsg time.Time
 
 func main() {
+	procfilePath := flag.String("p", "Procfile.dev", "path to Procfile")
+	flag.Parse()
+
+	if _, err := os.Stat(*procfilePath); os.IsNotExist(err) {
+		if *procfilePath == "Procfile.dev" {
+			fmt.Fprintf(os.Stderr, "Error: No Procfile.dev found in current directory.\n\n")
+			fmt.Fprintf(os.Stderr, "Please either:\n")
+			fmt.Fprintf(os.Stderr, "  1. Create a Procfile.dev in the current directory\n")
+			fmt.Fprintf(os.Stderr, "  2. Specify a different Procfile with -p\n\n")
+			fmt.Fprintf(os.Stderr, "Example: manifold -p path/to/Procfile\n")
+			os.Exit(1)
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: Procfile not found at %s\n", *procfilePath)
+			os.Exit(1)
+		}
+	}
+
 	cmd := tea.NewProgram(
 		&Model{
-			keys: keys,
-			help: help.New(),
+			keys:         keys,
+			help:         help.New(),
+			procfilePath: *procfilePath,
 		},
 		tea.WithAltScreen(),
 	)
