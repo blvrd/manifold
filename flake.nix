@@ -32,9 +32,10 @@
         # The Nix packages provided in the environment
         packages = with pkgs; [
           go
+          golangci-lint
+          gofumpt
         ];
       };
     });
   };
 }
-
