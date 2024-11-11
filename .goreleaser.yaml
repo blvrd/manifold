@@ -12,7 +12,9 @@ builds:
   - env: ["CGO_ENABLED=0"]
     mod_timestamp: "{{ .CommitTimestamp }}"
     flags: ["-trimpath"]
-    targets: ["go_first_class"]
+    goos:
+      - darwin
+      - linux
 
 changelog:
   sort: asc
