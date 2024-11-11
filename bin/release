@@ -1,0 +1,5 @@
+#!/bin/bash
+
+export GITHUB_TOKEN="$(op read "op://Private/Github/manifold_access_token")"
+goreleaser release --clean
+unset GITHUB_TOKEN
