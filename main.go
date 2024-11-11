@@ -372,7 +372,8 @@ func (m *Model) Init() tea.Cmd {
 	m.runningCmds = make(map[int]*exec.Cmd)
 	procfile, err := parseProcfile(m.procfilePath)
 	if err != nil {
-		panic("couldn't parse procfile")
+		fmt.Printf("Error opening log file: %v\n", err)
+		os.Exit(1)
 	}
 
 	var cmds []tea.Cmd
