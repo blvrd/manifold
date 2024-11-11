@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -353,14 +354,19 @@ func (m *Model) restartProcess(tabIndex int) tea.Cmd {
 }
 
 func (m *Model) Init() tea.Cmd {
-	logFile, err := os.OpenFile("debug.log", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		fmt.Printf("Error opening log file: %v\n", err)
-		os.Exit(1)
-	}
+	if os.Getenv("DEBUG") != "" {
+		logFile, err := os.OpenFile("debug.log", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			fmt.Printf("Error opening log file: %v\n", err)
+			os.Exit(1)
+		}
 
-	log.SetOutput(logFile)
-	log.SetLevel(log.DebugLevel)
+		log.SetOutput(logFile)
+		log.SetLevel(log.DebugLevel)
+	} else {
+		log.SetOutput(io.Discard)
+		log.SetLevel(log.FatalLevel)
+	}
 	log.Info("application started")
 
 	m.runningCmds = make(map[int]*exec.Cmd)
