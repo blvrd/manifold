@@ -215,7 +215,7 @@ func (m Model) FullHelpView(groups [][]key.Binding) string {
 			if m.Width > 0 && totalWidth > m.Width {
 				break
 			}
-      out = append(out, sep)
+			out = append(out, sep)
 		}
 	}
 
