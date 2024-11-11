@@ -191,7 +191,10 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 
 		if cmd, exists := m.runningCmds[tabIndex]; exists && cmd != nil && cmd.Process != nil {
 			m.cmdsMutex.Unlock()
-			m.killProcess(tabIndex)
+			err := m.killProcess(tabIndex)
+			if err != nil {
+				return processErrorMsg{tabIndex: tabIndex, err: err}
+			}
 			m.cmdsMutex.Lock()
 		}
 
@@ -229,12 +232,20 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 			for scanner.Scan() {
 				line := scanner.Bytes()
 				// log.Debug("pty received", "tab", tabIndex, "content", string(line))
-				m.tabs[tabIndex].Write(append(line, '\n'))
+				_, err := m.tabs[tabIndex].Write(append(line, '\n'))
+				if err != nil {
+					// handle this in a better way
+					panic(err)
+				}
 			}
 
 			if err := scanner.Err(); err != nil {
 				// log.Error("pty scanner error", "tab", tabIndex, "error", err)
-				m.tabs[tabIndex].Write([]byte(fmt.Sprintf("\nPTY error: %v\n", err)))
+				_, err := m.tabs[tabIndex].Write([]byte(fmt.Sprintf("\nPTY error: %v\n", err)))
+				if err != nil {
+					// handle this in a better way
+					panic(err)
+				}
 			}
 			// log.Debug("pty scanner finished", "tab", tabIndex)
 
@@ -243,7 +254,11 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 				m.cmdsMutex.Lock()
 				delete(m.runningCmds, tabIndex)
 				m.cmdsMutex.Unlock()
-				m.tabs[tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited with error: %v\n", err)))
+				_, err := m.tabs[tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited with error: %v\n", err)))
+				if err != nil {
+					// handle this in a better way
+					panic(err)
+				}
 				m.tabs[tabIndex].SetStatus(StatusError)
 			} else {
 				log.Debug("process exited successfully", "tab", tabIndex)
@@ -339,7 +354,6 @@ func (m *Model) restartProcess(tabIndex int) tea.Cmd {
 
 func (m *Model) Init() tea.Cmd {
 	logFile, err := os.OpenFile("debug.log", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-
 	if err != nil {
 		fmt.Printf("Error opening log file: %v\n", err)
 		os.Exit(1)
@@ -654,13 +668,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case processErrorMsg:
 		if msg.err != nil {
 			log.Errorf("Process error on tab %d: %v", msg.tabIndex, msg.err)
-			m.tabs[msg.tabIndex].Write([]byte(fmt.Sprintf("\nError: %v\n", msg.err)))
+			_, err := m.tabs[msg.tabIndex].Write([]byte(fmt.Sprintf("\nError: %v\n", msg.err)))
+			if err != nil {
+				// handle this in a better way
+				panic(err)
+			}
 			m.tabs[msg.tabIndex].SetStatus(StatusError)
 		}
 	case processExitMsg:
 		if msg.err != nil {
 			log.Warnf("Process on tab %d exited with error: %v", msg.tabIndex, msg.err)
-			m.tabs[msg.tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited %v\n", msg.err)))
+			_, err := m.tabs[msg.tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited %v\n", msg.err)))
+			if err != nil {
+				// handle this in a better way
+				panic(err)
+			}
 		}
 		delete(m.runningCmds, msg.tabIndex)
 	}
