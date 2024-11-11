@@ -15,3 +15,33 @@ builds:
     goos:
       - darwin
       - linux
+
+brews:
+  - name: manifold
+    repository:
+      owner: blvrd
+      name: homebrew-tap
+      branch: main
+    description: "Simple Procfile-based process manager"
+    homepage: "https://github.com/blvrd/manifold"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore"
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+      - go mod tidy
+  groups:
+    - title: "New Features"
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: "Bug fixes"
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 10
+
