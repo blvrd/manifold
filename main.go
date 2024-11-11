@@ -390,7 +390,7 @@ func (m *Model) getHelpContent() string {
 		for _, binding := range section {
 			keys := binding.Help().Key
 			desc := binding.Help().Desc
-			content.WriteString(fmt.Sprintf("%-5s: %s\n", keys, desc))
+			content.WriteString(fmt.Sprintf("%-12s: %s\n", keys, desc))
 		}
 		content.WriteString("\n")
 	}
@@ -532,21 +532,20 @@ func (k keyMap) ShortHelp() []key.Binding {
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.RestartProcess, k.ScrollTop, k.ScrollBottom},
-		{k.Follow, k.Unfollow, k.Help},
-		{k.Up, k.Down, k.Quit},
-		{k.Left, k.Right},
+    {k.RestartProcess, k.Clear, k.Follow, k.Unfollow},
+    {k.Up, k.Down, k.Left, k.Right, k.ScrollTop, k.ScrollBottom},
+    {k.Help, k.Quit},
 	}
 }
 
 var keys = keyMap{
 	Up: key.NewBinding(
 		key.WithKeys("up", "k"),
-		key.WithHelp("↑/k", "line up"),
+		key.WithHelp("↑/k/ctrl+u", "scroll up"),
 	),
 	Down: key.NewBinding(
 		key.WithKeys("down", "j"),
-		key.WithHelp("↓/j", "line down"),
+		key.WithHelp("↓/j/ctrl+d", "scroll down"),
 	),
 	Left: key.NewBinding(
 		key.WithKeys("left", "h"),
@@ -582,7 +581,7 @@ var keys = keyMap{
 	),
 	Help: key.NewBinding(
 		key.WithKeys("?"),
-		key.WithHelp("?", "toggle help"),
+		key.WithHelp("?", "open help"),
 	),
 	Quit: key.NewBinding(
 		key.WithKeys("q", "esc", "ctrl+c"),
