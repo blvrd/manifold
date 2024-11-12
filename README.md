@@ -19,4 +19,4 @@ You can find also download the binary directly from the [releases](https://githu
 
 ## Usage
 
-Run `manifold` in your project. By default, the program expects a `Procfile.dev` to be present. Otherwise, you can pass `--procfile {filename}`.
+Run `manifold` in your project. By default, the program expects a `Procfile.dev` to be present. Otherwise, you can pass `-f {filename}` to specify a Procfile.
