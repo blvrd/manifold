@@ -432,6 +432,10 @@ var (
 	highlightColor   = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
 	borderColor      = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#3e3e3e"}
 	lightText        = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#9f9f9f"}
+	streamingColor   = lipgloss.AdaptiveColor{Light: "#3498db", Dark: "#3498db"}
+	errorColor       = lipgloss.AdaptiveColor{Light: "#e74c3c", Dark: "#e74c3c"}
+	successColor     = lipgloss.AdaptiveColor{Light: "#2ecc71", Dark: "#2ecc71"}
+	dimmedColor      = lipgloss.AdaptiveColor{Light: "#c9c9c9", Dark: "#8a8a8a"}
 	activeTabStyle   = lipgloss.NewStyle().MarginRight(2).Bold(true)
 	inactiveTabStyle = lipgloss.NewStyle().MarginRight(2).Foreground(lightText)
 )
@@ -455,14 +459,14 @@ func (m *Model) View() string {
 
 		status := t.Status()
 		if status != StatusNone {
-			var dotColor lipgloss.Color
+			var dotColor lipgloss.AdaptiveColor
 			switch status {
 			case StatusStreaming:
-				dotColor = lipgloss.Color("#3498db")
+				dotColor = streamingColor
 			case StatusSuccess:
-				dotColor = lipgloss.Color("#2ecc71")
+				dotColor = successColor
 			case StatusError:
-				dotColor = lipgloss.Color("#e74c3c")
+				dotColor = errorColor
 			}
 
 			var statusIndicator string
