@@ -465,7 +465,12 @@ func (m *Model) View() string {
 				dotColor = lipgloss.Color("#e74c3c")
 			}
 
-			statusIndicator := lipgloss.NewStyle().MarginRight(1).Foreground(dotColor).Render("⏺")
+			var statusIndicator string
+			if m.quitting {
+				statusIndicator = lipgloss.NewStyle().MarginRight(1).Foreground(dimmedColor).Render("⏺")
+			} else {
+				statusIndicator = lipgloss.NewStyle().MarginRight(1).Foreground(dotColor).Render("⏺")
+			}
 			renderedTabs = append(renderedTabs, lipgloss.JoinHorizontal(lipgloss.Left, statusIndicator, tabNameStyle.Render(t.Name())))
 		} else {
 			renderedTabs = append(renderedTabs, tabNameStyle.Render(t.Name()))
@@ -481,12 +486,26 @@ func (m *Model) View() string {
 	}
 	doc.WriteString("\n")
 	if m.viewport.TotalLineCount() > m.viewport.VisibleLineCount() {
+		var color lipgloss.AdaptiveColor
+		if m.quitting {
+			color = dimmedColor
+		} else {
+			color = borderColor
+
+		}
 		doc.WriteString(
-			lipgloss.JoinHorizontal(lipgloss.Center, docStyle.Width((m.terminalSize.width-docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(borderColor).Render(m.viewport.View()), m.scrollbar.View()),
+			lipgloss.JoinHorizontal(lipgloss.Center, docStyle.Width((m.terminalSize.width-docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(color).Render(m.viewport.View()), m.scrollbar.View()),
 		)
 	} else {
+		var color lipgloss.AdaptiveColor
+		if m.quitting {
+			color = dimmedColor
+		} else {
+			color = borderColor
+
+		}
 		doc.WriteString(
-			docStyle.Width((m.terminalSize.width - docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(borderColor).Render(m.viewport.View()),
+			docStyle.Width((m.terminalSize.width - docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(color).Render(m.viewport.View()),
 		)
 	}
 	helpView := m.help.View(m.keys)
