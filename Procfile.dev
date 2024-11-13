@@ -2,3 +2,4 @@ web: bash fake_process.sh
 queue: git status
 tailwind: bash fake_process.sh
 unit_tests: bash bad_process.sh
+input: bash user_input.sh
