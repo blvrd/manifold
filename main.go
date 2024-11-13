@@ -170,6 +170,7 @@ type Model struct {
 	keys         keyMap
 	help         help.Model
 	procfilePath string
+	quitting     bool
 }
 
 type processErrorMsg struct {
@@ -308,7 +309,11 @@ func (m *Model) killProcess(tabIndex int) error {
 	return syscall.Kill(-pid, syscall.SIGKILL)
 }
 
-func (m *Model) cleanup() error {
+type cleanupDoneMsg struct {
+	err error
+}
+
+func (m *Model) cleanup() tea.Msg {
 	var errors []error
 	done := make(chan bool)
 
@@ -336,13 +341,13 @@ func (m *Model) cleanup() error {
 	select {
 	case <-done:
 		if len(errors) > 0 {
-			return fmt.Errorf("cleanup errors: %v", errors)
+			return cleanupDoneMsg{err: fmt.Errorf("cleanup errors: %v", errors)}
 		}
 	case <-time.After(5 * time.Second):
-		return fmt.Errorf("cleanup timed out after 5 seconds")
+		return cleanupDoneMsg{err: fmt.Errorf("cleanup timed out after 5 seconds")}
 	}
 
-	return nil
+	return cleanupDoneMsg{}
 }
 
 func (m *Model) restartProcess(tabIndex int) tea.Cmd {
@@ -487,7 +492,15 @@ func (m *Model) View() string {
 	helpView := m.help.View(m.keys)
 	doc.WriteString("\n")
 	doc.WriteString(helpView)
-	return windowStyle.Render(doc.String())
+
+	window := windowStyle.Render(doc.String())
+	if m.quitting {
+		overlayBoxStyle := lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).Width(40).Height(4).Padding(1)
+		overlayContent := overlayBoxStyle.Render("Shutting down processes gracefully...")
+
+		return PlaceOverlay(50, 50, overlayContent, windowStyle.Faint(true).Render(doc.String()), false)
+	}
+	return window
 }
 
 type TabDirection int
@@ -616,14 +629,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 
+	if m.quitting {
+		switch msg := msg.(type) {
+		case cleanupDoneMsg:
+			if msg.err != nil {
+				log.Errorf("Cleanup error: %v", msg.err)
+			}
+			return m, tea.Quit
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, keys.Quit):
-			if err := m.cleanup(); err != nil {
-				log.Errorf("Cleanup error: %v", err)
-			}
-			return m, tea.Quit
+			m.quitting = true
+			return m, m.cleanup
 		case key.Matches(msg, keys.Help):
 			// m.help.ShowAll = !m.help.ShowAll
 			return m, m.switchToLastTab()
