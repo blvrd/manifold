@@ -87,6 +87,7 @@ const (
 	StatusStreaming
 	StatusSuccess
 	StatusError
+	StatusQuitting
 )
 
 type Tab interface {
@@ -428,7 +429,7 @@ func (m *Model) getHelpContent() string {
 
 var (
 	docStyle         = lipgloss.NewStyle().Padding(0).Border(lipgloss.NormalBorder(), true).BorderForeground(borderColor)
-	windowStyle      = lipgloss.NewStyle().Padding(1)
+	windowStyle      = lipgloss.NewStyle().Padding(1, 2)
 	highlightColor   = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
 	borderColor      = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#3e3e3e"}
 	lightText        = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#9f9f9f"}
@@ -467,14 +468,11 @@ func (m *Model) View() string {
 				dotColor = successColor
 			case StatusError:
 				dotColor = errorColor
+			case StatusQuitting:
+				dotColor = dimmedColor
 			}
 
-			var statusIndicator string
-			if m.quitting {
-				statusIndicator = lipgloss.NewStyle().MarginRight(1).Foreground(dimmedColor).Render("⏺")
-			} else {
-				statusIndicator = lipgloss.NewStyle().MarginRight(1).Foreground(dotColor).Render("⏺")
-			}
+			statusIndicator := lipgloss.NewStyle().MarginRight(1).Foreground(dotColor).Render("⏺")
 			renderedTabs = append(renderedTabs, lipgloss.JoinHorizontal(lipgloss.Left, statusIndicator, tabNameStyle.Render(t.Name())))
 		} else {
 			renderedTabs = append(renderedTabs, tabNameStyle.Render(t.Name()))
@@ -646,7 +644,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.quitting {
 		switch msg := msg.(type) {
 		case cleanupDoneMsg:
-			time.Sleep(2 * time.Second)
 			if msg.err != nil {
 				log.Errorf("Cleanup error: %v", msg.err)
 			}
@@ -659,6 +656,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, keys.Quit):
 			m.quitting = true
+			for _, t := range m.tabs {
+				t.SetStatus(StatusQuitting)
+			}
 			return m, m.cleanup
 		case key.Matches(msg, keys.Help):
 			// m.help.ShowAll = !m.help.ShowAll
