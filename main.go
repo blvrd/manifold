@@ -172,6 +172,7 @@ type Model struct {
 	help         help.Model
 	procfilePath string
 	quitting     bool
+	interactive  bool
 }
 
 type processErrorMsg struct {
@@ -486,18 +487,30 @@ func (m *Model) View() string {
 	if len(m.currentTab().CommandStrings()) > 0 {
 		doc.WriteString(lipgloss.NewStyle().Foreground(lightText).Render(fmt.Sprintf("Running: %s", strings.Join(m.currentTab().CommandStrings(), " "))))
 	}
+
+	if m.interactive {
+		doc.WriteString(lipgloss.NewStyle().Render(" (interactive)"))
+	}
+
 	doc.WriteString("\n")
+
+	var style lipgloss.Style
+	if m.interactive {
+		style = docStyle.BorderForeground(streamingColor)
+	} else {
+		style = docStyle
+	}
 	if m.viewport.TotalLineCount() > m.viewport.VisibleLineCount() {
 		doc.WriteString(
 			lipgloss.JoinHorizontal(
 				lipgloss.Center,
-				docStyle.Width(m.viewport.Width).Render(m.viewport.View()),
+				style.Width(m.viewport.Width).Render(m.viewport.View()),
 				m.scrollbar.View(),
 			),
 		)
 	} else {
 		doc.WriteString(
-			docStyle.Width(m.viewport.Width).Render(m.viewport.View()),
+			style.Width(m.viewport.Width).Render(m.viewport.View()),
 		)
 	}
 	helpView := m.help.View(m.keys)
@@ -565,6 +578,7 @@ type keyMap struct {
 	Left           key.Binding
 	Right          key.Binding
 	RestartProcess key.Binding
+	Interact       key.Binding
 	Clear          key.Binding
 	Follow         key.Binding
 	Unfollow       key.Binding
@@ -606,6 +620,10 @@ var keys = keyMap{
 	RestartProcess: key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("r", "restart process"),
+	),
+	Interact: key.NewBinding(
+		key.WithKeys("i"),
+		key.WithHelp("i", "interact with process"),
 	),
 	Clear: key.NewBinding(
 		key.WithKeys("c"),
@@ -651,6 +669,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.interactive {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch {
+			case key.Matches(msg, keys.Quit):
+				m.interactive = false
+				return m, nil
+			}
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -665,6 +694,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.switchToLastTab()
 		case key.Matches(msg, keys.RestartProcess):
 			return m, m.restartProcess(m.activeTab)
+		case key.Matches(msg, keys.Interact):
+			m.interactive = true
+			return m, nil
 		case key.Matches(msg, keys.Clear):
 			m.currentTab().Clear()
 			return m, nil
