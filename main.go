@@ -427,8 +427,8 @@ func (m *Model) getHelpContent() string {
 }
 
 var (
-	docStyle         = lipgloss.NewStyle().Padding(0)
-	windowStyle      = lipgloss.NewStyle().Padding(2)
+	docStyle         = lipgloss.NewStyle().Padding(0).Border(lipgloss.NormalBorder(), true).BorderForeground(borderColor)
+	windowStyle      = lipgloss.NewStyle().Padding(1)
 	highlightColor   = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
 	borderColor      = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#3e3e3e"}
 	lightText        = lipgloss.AdaptiveColor{Light: "#a0a0a0", Dark: "#9f9f9f"}
@@ -490,26 +490,16 @@ func (m *Model) View() string {
 	}
 	doc.WriteString("\n")
 	if m.viewport.TotalLineCount() > m.viewport.VisibleLineCount() {
-		var color lipgloss.AdaptiveColor
-		if m.quitting {
-			color = dimmedColor
-		} else {
-			color = borderColor
-
-		}
 		doc.WriteString(
-			lipgloss.JoinHorizontal(lipgloss.Center, docStyle.Width((m.terminalSize.width-docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(color).Render(m.viewport.View()), m.scrollbar.View()),
+			lipgloss.JoinHorizontal(
+				lipgloss.Center,
+				docStyle.Width(m.viewport.Width).Render(m.viewport.View()),
+				m.scrollbar.View(),
+			),
 		)
 	} else {
-		var color lipgloss.AdaptiveColor
-		if m.quitting {
-			color = dimmedColor
-		} else {
-			color = borderColor
-
-		}
 		doc.WriteString(
-			docStyle.Width((m.terminalSize.width - docStyle.GetHorizontalFrameSize())).Border(lipgloss.NormalBorder(), true).BorderForeground(color).Render(m.viewport.View()),
+			docStyle.Width(m.viewport.Width).Render(m.viewport.View()),
 		)
 	}
 	helpView := m.help.View(m.keys)
@@ -521,7 +511,7 @@ func (m *Model) View() string {
 		overlayBoxStyle := lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).Width(40).Height(4).Padding(1)
 		overlayContent := overlayBoxStyle.Render("Shutting down processes gracefully...")
 
-		return PlaceOverlay(50, 50, overlayContent, windowStyle.Faint(true).Render(doc.String()), false)
+		return PlaceOverlay(m.terminalSize.width/2-20, m.terminalSize.height/2-4, overlayContent, windowStyle.Faint(true).Render(doc.String()), false)
 	}
 	return window
 }
@@ -655,6 +645,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.quitting {
 		switch msg := msg.(type) {
 		case cleanupDoneMsg:
+			time.Sleep(2 * time.Second)
 			if msg.err != nil {
 				log.Errorf("Cleanup error: %v", msg.err)
 			}
@@ -700,21 +691,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 		}
 	case tea.WindowSizeMsg:
+		contentWidth := msg.Width - windowStyle.GetHorizontalFrameSize() - docStyle.GetHorizontalFrameSize()
+		contentHeight := msg.Height - windowStyle.GetVerticalFrameSize() - docStyle.GetVerticalFrameSize() - 4 // -4 for tab row and help line
+
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width-20, msg.Height-20)
+			m.terminalSize = size{width: msg.Width, height: msg.Height}
+
+			m.viewport = viewport.New(contentWidth, contentHeight)
 			m.scrollbar = scrollbar.NewVertical(
 				scrollbar.WithThumbStyle(lipgloss.NewStyle().Foreground(highlightColor).SetString("┃")),
 				scrollbar.WithTrackStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).SetString("│")),
 			)
-			m.scrollbar, cmd = m.scrollbar.Update(scrollbar.HeightMsg(m.viewport.Height))
+			m.scrollbar, cmd = m.scrollbar.Update(scrollbar.HeightMsg(contentHeight))
 			cmds = append(cmds, cmd)
 			m.viewport.SetContent("Loading...")
 			m.ready = true
 			break
 		}
-		m.viewport.Width = msg.Width - 20
-		m.viewport.Height = msg.Height - 20
-		m.scrollbar, cmd = m.scrollbar.Update(scrollbar.HeightMsg(m.viewport.Height))
+
+		m.viewport.Width = contentWidth
+		m.viewport.Height = contentHeight
+
+		m.scrollbar, cmd = m.scrollbar.Update(scrollbar.HeightMsg(contentHeight))
 		cmds = append(cmds, cmd)
 	case processErrorMsg:
 		if msg.err != nil {
