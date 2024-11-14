@@ -511,7 +511,8 @@ func (m *Model) View() string {
 		overlayBoxStyle := lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).Width(40).Height(4).Padding(1)
 		overlayContent := overlayBoxStyle.Render("Shutting down processes gracefully...")
 
-		return PlaceOverlay(m.terminalSize.width/2-20, m.terminalSize.height/2-4, overlayContent, windowStyle.Faint(true).Render(doc.String()), false)
+		// Place the overlay in the center of the screen (sorta)
+		return PlaceOverlay(m.terminalSize.width/2-overlayBoxStyle.GetWidth()/2, m.terminalSize.height/2-10, overlayContent, windowStyle.Faint(true).Render(doc.String()), false)
 	}
 	return window
 }
