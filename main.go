@@ -288,14 +288,14 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 			}
 		}()
 
-		return func() tea.Msg {
-			select {
-			case errMsg := <-errChan:
-				return errMsg
-			default:
-				return nil
-			}
-		}
+    return func() tea.Msg {
+      select {
+      case errMsg := <-errChan:
+        return errMsg
+      case <-time.After(100*time.Millisecond):
+        return nil
+      }
+    }
 	}
 }
 
