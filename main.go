@@ -247,6 +247,8 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 		tab.SetRunningCmd(cmd)
 		tab.SetStatus(StatusStreaming)
 
+		errChan := make(chan processErrorMsg)
+
 		go func() {
 			defer ptmx.Close()
 			scanner := bufio.NewScanner(ptmx)
@@ -255,8 +257,8 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 				// log.Debug("pty received", "tab", tabIndex, "content", string(line))
 				_, err := tab.Write(append(line, '\n'))
 				if err != nil {
-					// handle this in a better way
-					panic(err)
+					errChan <- processErrorMsg{err: err, tabIndex: tabIndex}
+					return
 				}
 			}
 
@@ -264,8 +266,8 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 				// log.Error("pty scanner error", "tab", tabIndex, "error", err)
 				_, err := tab.Write([]byte(fmt.Sprintf("\nPTY error: %v\n", err)))
 				if err != nil {
-					// handle this in a better way
-					panic(err)
+					errChan <- processErrorMsg{err: err, tabIndex: tabIndex}
+					return
 				}
 			}
 			// log.Debug("pty scanner finished", "tab", tabIndex)
@@ -275,8 +277,8 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 				tab.SetRunningCmd(nil)
 				_, err := tab.Write([]byte(fmt.Sprintf("\nProcess exited with error: %v\n", err)))
 				if err != nil {
-					// handle this in a better way
-					panic(err)
+					errChan <- processErrorMsg{err: err, tabIndex: tabIndex}
+					return
 				}
 				tab.SetStatus(StatusError)
 			} else {
@@ -286,7 +288,14 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 			}
 		}()
 
-		return nil
+		return func() tea.Msg {
+			select {
+			case errMsg := <-errChan:
+				return errMsg
+			default:
+				return nil
+			}
+		}
 	}
 }
 
