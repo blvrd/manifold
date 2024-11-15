@@ -33,51 +33,55 @@ type size struct {
 }
 
 type bufferedOutput struct {
-	maxLines int
-	lines    []string
+	maxBytes int
+	buffer   []byte
 	mu       sync.Mutex
 }
 
-func newBufferedOutput(maxLines int) *bufferedOutput {
+func newBufferedOutput(maxBytes int) *bufferedOutput {
 	return &bufferedOutput{
-		maxLines: maxLines,
-		lines:    make([]string, 0, maxLines),
+		maxBytes: maxBytes,
+		buffer:   make([]byte, 0, maxBytes),
 	}
 }
 
-func (b *bufferedOutput) Write(p []byte) (n int, err error) {
+// Write implements io.Writer. Once the size of the buffer exceeds the buffer's
+// maxBytes, earlier content is truncated
+func (b *bufferedOutput) Write(data []byte) (int, error) {
+	if len(data) > b.maxBytes {
+		return 0, fmt.Errorf("write size %d exceeds buffer max size %d", len(data), b.maxBytes)
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	text := string(p)
-	lines := strings.Split(text, "\n")
+	if (len(b.buffer) + len(data)) > b.maxBytes {
+		spillover := len(b.buffer) + len(data) - b.maxBytes
 
-	for _, line := range lines {
-		if line == "" {
-			continue
+		if spillover < len(b.buffer) {
+			b.buffer = b.buffer[spillover:]
+		} else {
+			b.buffer = b.buffer[:0]
 		}
-
-		if len(b.lines) >= b.maxLines {
-			b.lines = b.lines[1:]
-		}
-		b.lines = append(b.lines, line)
+		return len(data), nil
 	}
+	b.buffer = append(b.buffer, data...)
 
-	return len(p), nil
+	return len(data), nil
 }
 
 func (b *bufferedOutput) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return strings.Join(b.lines, "\n")
+	return string(b.buffer)
 }
 
 func (b *bufferedOutput) Clear() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.lines = []string{}
+	b.buffer = b.buffer[:0:b.maxBytes]
 }
 
 type TabStatus int
@@ -121,7 +125,7 @@ func NewProcessTab(name string, commandStrings []string) *ProcessTab {
 	return &ProcessTab{
 		name:           name,
 		commandStrings: commandStrings,
-		buffer:         newBufferedOutput(10000),
+		buffer:         newBufferedOutput(1000),
 	}
 }
 
@@ -288,14 +292,14 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 			}
 		}()
 
-    return func() tea.Msg {
-      select {
-      case errMsg := <-errChan:
-        return errMsg
-      case <-time.After(100*time.Millisecond):
-        return nil
-      }
-    }
+		return func() tea.Msg {
+			select {
+			case errMsg := <-errChan:
+				return errMsg
+			case <-time.After(100 * time.Millisecond):
+				return nil
+			}
+		}
 	}
 }
 
