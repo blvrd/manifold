@@ -12,6 +12,7 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6
 	github.com/muesli/reflow v0.3.0
 	github.com/muesli/termenv v0.15.2
+	golang.org/x/sys v0.27.0
 )
 
 require (
@@ -27,6 +28,5 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
 	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.26.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
 )

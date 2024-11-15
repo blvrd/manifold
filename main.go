@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"golang.org/x/sys/unix"
+	// "golang.org/x/term"
 	"io"
 	"os"
 	"os/exec"
@@ -11,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/blvrd/manifold/help"
 	"github.com/blvrd/manifold/scrollbar"
@@ -33,15 +36,15 @@ type size struct {
 }
 
 type bufferedOutput struct {
-	maxLines int
-	lines    []string
+	maxBytes int
+	buffer   []byte
 	mu       sync.Mutex
 }
 
-func newBufferedOutput(maxLines int) *bufferedOutput {
+func newBufferedOutput(maxBytes int) *bufferedOutput {
 	return &bufferedOutput{
-		maxLines: maxLines,
-		lines:    make([]string, 0, maxLines),
+		maxBytes: maxBytes,
+		buffer:   make([]byte, 0, maxBytes),
 	}
 }
 
@@ -49,20 +52,16 @@ func (b *bufferedOutput) Write(p []byte) (n int, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	text := string(p)
-	lines := strings.Split(text, "\n")
-
-	for _, line := range lines {
-		if line == "" {
-			continue
+	if len(b.buffer)+len(p) > b.maxBytes {
+		excess := len(b.buffer) + len(p) - b.maxBytes
+		if excess < len(b.buffer) {
+			b.buffer = b.buffer[excess:]
+		} else {
+			b.buffer = b.buffer[:0]
 		}
-
-		if len(b.lines) >= b.maxLines {
-			b.lines = b.lines[1:]
-		}
-		b.lines = append(b.lines, line)
 	}
 
+	b.buffer = append(b.buffer, p...)
 	return len(p), nil
 }
 
@@ -70,14 +69,14 @@ func (b *bufferedOutput) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return strings.Join(b.lines, "\n")
+	return string(b.buffer)
 }
 
 func (b *bufferedOutput) Clear() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.lines = []string{}
+	b.buffer = b.buffer[:0]
 }
 
 type TabStatus int
@@ -102,6 +101,7 @@ type Tab interface {
 	SetFollowing(bool)
 	Write([]byte) (int, error)
 	CommandStrings() []string
+	WriteToPty([]byte) error
 }
 
 type ProcessTab struct {
@@ -111,13 +111,16 @@ type ProcessTab struct {
 	status         TabStatus
 	buffer         *bufferedOutput
 	commandStrings []string
+	pty            *os.File
+	termios        *unix.Termios
+	origTermios    *unix.Termios
 }
 
 func NewProcessTab(name string, commandStrings []string) *ProcessTab {
 	return &ProcessTab{
 		name:           name,
 		commandStrings: commandStrings,
-		buffer:         newBufferedOutput(10000),
+		buffer:         newBufferedOutput(1024 * 1024), // 1MB
 	}
 }
 
@@ -137,22 +140,33 @@ func (p *ProcessTab) Write(b []byte) (int, error) {
 	return p.buffer.Write(b)
 }
 
+func (p *ProcessTab) WriteToPty(b []byte) error {
+	if p.pty == nil {
+		return fmt.Errorf("no PTY available")
+	}
+	log.Debug("writing to pty", "bytes", b, "string", string(b))
+	n, err := p.pty.Write(b)
+	log.Debug("wrote to pty", "bytes_written", n)
+	return err
+}
+
 type HelpTab struct {
 	name    string
 	yOffset int
 	content string
 }
 
-func (h *HelpTab) Name() string             { return h.name }
-func (h *HelpTab) Content() string          { return h.content }
-func (h *HelpTab) Status() TabStatus        { return StatusNone }
-func (h *HelpTab) SetStatus(TabStatus)      { /* noop */ }
-func (h *HelpTab) YOffset() int             { return h.yOffset }
-func (h *HelpTab) SetYOffset(y int)         { h.yOffset = y }
-func (h *HelpTab) Following() bool          { return false }
-func (h *HelpTab) SetFollowing(bool)        { /* noop */ }
-func (h *HelpTab) CommandStrings() []string { return nil }
-func (h *HelpTab) Clear()                   {}
+func (h *HelpTab) Name() string              { return h.name }
+func (h *HelpTab) Content() string           { return h.content }
+func (h *HelpTab) Status() TabStatus         { return StatusNone }
+func (h *HelpTab) SetStatus(TabStatus)       { /* noop */ }
+func (h *HelpTab) YOffset() int              { return h.yOffset }
+func (h *HelpTab) SetYOffset(y int)          { h.yOffset = y }
+func (h *HelpTab) Following() bool           { return false }
+func (h *HelpTab) SetFollowing(bool)         { /* noop */ }
+func (h *HelpTab) CommandStrings() []string  { return nil }
+func (h *HelpTab) Clear()                    {}
+func (h *HelpTab) WriteToPty(b []byte) error { return nil }
 
 func (h *HelpTab) Write(b []byte) (int, error) {
 	h.content = string(b)
@@ -209,6 +223,44 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 		ptmx, tty, err := pty.Open()
 		if err != nil {
 			log.Error("failed to open pty", "error", err)
+			return processErrorMsg{tabIndex: tabIndex, err: err}
+		}
+
+		// Get current settings for both master and slave
+		masterTermios, err := unix.IoctlGetTermios(int(ptmx.Fd()), unix.TIOCGETA)
+		if err != nil {
+			log.Error("failed to get master termios", "error", err)
+			return processErrorMsg{tabIndex: tabIndex, err: err}
+		}
+		slaveTermios, err := unix.IoctlGetTermios(int(tty.Fd()), unix.TIOCGETA)
+		if err != nil {
+			log.Error("failed to get slave termios", "error", err)
+			return processErrorMsg{tabIndex: tabIndex, err: err}
+		}
+
+		// Save original settings
+		origTermios := *slaveTermios
+
+		// Configure slave PTY
+		slaveTermios.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
+		slaveTermios.Oflag &^= unix.OPOST
+		slaveTermios.Lflag &^= unix.ECHO | unix.ECHONL | unix.ICANON | unix.ISIG | unix.IEXTEN
+		slaveTermios.Cflag &^= unix.CSIZE | unix.PARENB
+		slaveTermios.Cflag |= unix.CS8
+
+		// Configure master PTY
+		masterTermios.Iflag |= unix.ICRNL
+		masterTermios.Oflag |= unix.ONLCR
+		masterTermios.Lflag |= unix.ICANON | unix.ECHO
+
+		if err := unix.IoctlSetTermios(int(tty.Fd()), unix.TIOCSETA, slaveTermios); err != nil {
+			log.Error("failed to set slave termios", "error", err)
+			return processErrorMsg{tabIndex: tabIndex, err: err}
+		}
+
+		if err := unix.IoctlSetTermios(int(ptmx.Fd()), unix.TIOCSETA, masterTermios); err != nil {
+			log.Error("failed to set master termios", "error", err)
+			return processErrorMsg{tabIndex: tabIndex, err: err}
 		}
 
 		cmd.Stdout = tty
@@ -222,6 +274,14 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 			return processErrorMsg{tabIndex: tabIndex, err: err}
 		}
 
+		// Store the states in the ProcessTab for cleanup
+		if pt, ok := m.tabs[tabIndex].(*ProcessTab); ok {
+			pt.pty = ptmx
+      pt.termios = masterTermios
+      pt.origTermios = &origTermios
+		}
+
+		// close our end of the tty - the process has its own file descriptor now
 		tty.Close()
 
 		log.Debug("process started successfully", "tab", tabIndex, "pid", cmd.Process.Pid)
@@ -230,39 +290,65 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 		m.tabs[tabIndex].SetStatus(StatusStreaming)
 		m.cmdsMutex.Unlock()
 
+		readDone := make(chan struct{})
 		go func() {
-			defer ptmx.Close()
-			scanner := bufio.NewScanner(ptmx)
-			for scanner.Scan() {
-				line := scanner.Bytes()
-				// log.Debug("pty received", "tab", tabIndex, "content", string(line))
-				_, err := m.tabs[tabIndex].Write(append(line, '\n'))
+			defer close(readDone)
+			// remove the pty from the tab when we're done
+			defer func() {
+				if pt, ok := m.tabs[tabIndex].(*ProcessTab); ok {
+					if pt != nil {
+						if pt.termios != nil {
+							unix.IoctlSetTermios(int(pt.pty.Fd()), unix.TIOCSETA, pt.termios)
+						}
+						pt.pty.Close()
+						pt.pty = nil
+					}
+				}
+			}()
+
+			log.Debug("starting pty read loop", "tab", tabIndex)
+			buf := make([]byte, 32*1024)
+
+			for {
+				n, err := ptmx.Read(buf)
 				if err != nil {
-					// handle this in a better way
-					panic(err)
+					if err != io.EOF {
+						log.Error("pty read error", "error", err)
+					}
+					log.Debug("pty read loop ended", "error", err, "tab", tabIndex)
+					break
+				}
+
+				if n > 0 {
+					log.Debug("read from pty",
+						"bytes", buf[:n],
+						"string", string(buf[:n]),
+						"length", n,
+						"tab", tabIndex)
+					_, err = m.tabs[tabIndex].Write(buf[:n])
+					if err != nil {
+						log.Error("tab write error", "error", err)
+						break
+					}
 				}
 			}
+		}()
 
-			if err := scanner.Err(); err != nil {
-				// log.Error("pty scanner error", "tab", tabIndex, "error", err)
-				_, err := m.tabs[tabIndex].Write([]byte(fmt.Sprintf("\nPTY error: %v\n", err)))
-				if err != nil {
-					// handle this in a better way
-					panic(err)
-				}
-			}
-			// log.Debug("pty scanner finished", "tab", tabIndex)
-
+		go func() {
+			defer func() {
+				<-readDone // wait for read loop to finish
+				log.Debug("command wait finished", "tab", tabIndex)
+			}()
 			if err := cmd.Wait(); err != nil {
 				log.Error("process exited with error", "tab", tabIndex, "error", err)
 				m.cmdsMutex.Lock()
 				delete(m.runningCmds, tabIndex)
 				m.cmdsMutex.Unlock()
-				_, err := m.tabs[tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited with error: %v\n", err)))
-				if err != nil {
-					// handle this in a better way
-					panic(err)
-				}
+				// _, err := m.tabs[tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited with error: %v\n", err)))
+				// if err != nil {
+				// 	// handle this in a better way
+				// 	panic(err)
+				// }
 				m.tabs[tabIndex].SetStatus(StatusError)
 			} else {
 				log.Debug("process exited successfully", "tab", tabIndex)
@@ -358,6 +444,85 @@ func (m *Model) restartProcess(tabIndex int) tea.Cmd {
 	}
 
 	return nil
+}
+
+func (m *Model) handlePtyInput(msg tea.KeyMsg) tea.Cmd {
+	// this shouldn't need the type switch every time, right??
+	if pt, ok := m.tabs[m.activeTab].(*ProcessTab); ok {
+
+		var bytes []byte
+		switch msg.Type {
+		case tea.KeyRunes:
+			bytes = []byte(msg.String())
+		case tea.KeyEnter:
+			bytes = []byte{'\r'}
+		case tea.KeyBackspace:
+			bytes = []byte{'\x7f'}
+    case tea.KeyLeft:
+        bytes = []byte{'\x1b', '[', 'D'}
+    case tea.KeyRight:
+        bytes = []byte{'\x1b', '[', 'C'}
+    case tea.KeyUp:
+        bytes = []byte{'\x1b', '[', 'A'}
+    case tea.KeyDown:
+        bytes = []byte{'\x1b', '[', 'B'}
+		case tea.KeyCtrlC:
+			bytes = []byte{'\x03'}
+		case tea.KeyCtrlD:
+			bytes = []byte{'\x04'}
+		case tea.KeyCtrlU:
+			bytes = []byte{'\x15'}
+		case tea.KeyCtrlW:
+			bytes = []byte{'\x17'}
+		case tea.KeyTab:
+			bytes = []byte{'\t'}
+		case tea.KeySpace:
+			bytes = []byte{' '}
+		default:
+			log.Debug("unhandled key type", "type", msg.Type)
+			return nil
+		}
+
+		log.Debug("sending to pty",
+			"key_type", msg.Type,
+			"bytes", bytes,
+			"hex", fmt.Sprintf("%x", bytes))
+
+		if err := pt.WriteToPty(bytes); err != nil {
+			log.Error("failed to write to pty", "error", err)
+		}
+	}
+
+	return nil
+}
+
+func (m *Model) setTerminalSize(width, height int) {
+	m.cmdsMutex.Lock()
+	defer m.cmdsMutex.Unlock()
+
+	for i, tab := range m.tabs {
+		if pt, ok := tab.(*ProcessTab); ok && pt.pty != nil {
+			if cmd, exists := m.runningCmds[i]; exists && cmd != nil && cmd.Process != nil {
+				ws := &struct {
+					Row    uint16
+					Col    uint16
+					Xpixel uint16
+					Ypixel uint16
+				}{
+					Row:    uint16(height),
+					Col:    uint16(width),
+					Xpixel: 0,
+					Ypixel: 0,
+				}
+				syscall.Syscall(
+					syscall.SYS_IOCTL,
+					pt.pty.Fd(),
+					syscall.TIOCSWINSZ,
+					uintptr(unsafe.Pointer(ws)),
+				)
+			}
+		}
+	}
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -673,9 +838,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch {
-			case key.Matches(msg, keys.Quit):
+			case msg.Type == tea.KeyEsc:
 				m.interactive = false
 				return m, nil
+			default:
+				log.Debug("handling interactive input", "key", msg.String())
+				return m, m.handlePtyInput(msg)
 			}
 		}
 	}
@@ -727,6 +895,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		contentWidth := msg.Width - windowStyle.GetHorizontalFrameSize() - docStyle.GetHorizontalFrameSize()
 		contentHeight := msg.Height - windowStyle.GetVerticalFrameSize() - docStyle.GetVerticalFrameSize() - 4 // -4 for tab row and help line
 
+		m.setTerminalSize(contentWidth, contentHeight)
 		if !m.ready {
 			m.terminalSize = size{width: msg.Width, height: msg.Height}
 
