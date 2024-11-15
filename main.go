@@ -55,18 +55,21 @@ func (b *bufferedOutput) Write(data []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if (len(b.buffer) + len(data)) > b.maxBytes {
-		spillover := len(b.buffer) + len(data) - b.maxBytes
+	newSize := len(b.buffer) + len(data)
+	if newSize > b.maxBytes {
+		// How much do we need to truncate?
+		spillover := newSize - b.maxBytes
 
 		if spillover < len(b.buffer) {
-			b.buffer = b.buffer[spillover:]
+			copy(b.buffer, b.buffer[spillover:])
+			b.buffer = b.buffer[:len(b.buffer)-spillover]
 		} else {
 			b.buffer = b.buffer[:0]
 		}
 		return len(data), nil
 	}
-	b.buffer = append(b.buffer, data...)
 
+	b.buffer = append(b.buffer, data...)
 	return len(data), nil
 }
 
