@@ -29,7 +29,7 @@ type externalCmd struct {
 
 type size struct {
 	width  int
-	height int //nolint:all
+	height int
 }
 
 type bufferedOutput struct {
