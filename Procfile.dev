@@ -1,4 +1,4 @@
-web: bash fake_process.sh
+web: bash testdata/fake_process.sh
 queue: git status
-tailwind: bash fake_process.sh
-unit_tests: bash bad_process.sh
+tailwind: bash testdata/fake_process.sh
+unit_tests: bash testdata/bad_process.sh
