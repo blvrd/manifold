@@ -102,6 +102,8 @@ type Tab interface {
 	SetFollowing(bool)
 	Write([]byte) (int, error)
 	CommandStrings() []string
+	RunningCmd() *exec.Cmd
+	SetRunningCmd(*exec.Cmd)
 }
 
 type ProcessTab struct {
@@ -111,6 +113,8 @@ type ProcessTab struct {
 	status         TabStatus
 	buffer         *bufferedOutput
 	commandStrings []string
+	runningCmd     *exec.Cmd
+	mu             sync.Mutex
 }
 
 func NewProcessTab(name string, commandStrings []string) *ProcessTab {
@@ -124,16 +128,37 @@ func NewProcessTab(name string, commandStrings []string) *ProcessTab {
 func (p *ProcessTab) Name() string             { return p.name }
 func (p *ProcessTab) Content() string          { return p.buffer.String() }
 func (p *ProcessTab) Clear()                   { p.buffer.Clear() }
-func (p *ProcessTab) Status() TabStatus        { return p.status }
-func (p *ProcessTab) SetStatus(s TabStatus)    { p.status = s }
 func (p *ProcessTab) YOffset() int             { return p.yOffset }
 func (p *ProcessTab) SetYOffset(y int)         { p.yOffset = y }
 func (p *ProcessTab) Following() bool          { return p.following }
 func (p *ProcessTab) SetFollowing(f bool)      { p.following = f }
 func (p *ProcessTab) CommandStrings() []string { return p.commandStrings }
 
+func (p *ProcessTab) Status() TabStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.status
+}
+
+func (p *ProcessTab) SetStatus(s TabStatus) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.status = s
+}
+
+func (p *ProcessTab) RunningCmd() *exec.Cmd {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.runningCmd
+}
+func (p *ProcessTab) SetRunningCmd(cmd *exec.Cmd) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.runningCmd = cmd
+}
+
 func (p *ProcessTab) Write(b []byte) (int, error) {
-	p.status = StatusStreaming
+	p.SetStatus(StatusStreaming)
 	return p.buffer.Write(b)
 }
 
@@ -143,16 +168,18 @@ type HelpTab struct {
 	content string
 }
 
-func (h *HelpTab) Name() string             { return h.name }
-func (h *HelpTab) Content() string          { return h.content }
-func (h *HelpTab) Status() TabStatus        { return StatusNone }
-func (h *HelpTab) SetStatus(TabStatus)      { /* noop */ }
-func (h *HelpTab) YOffset() int             { return h.yOffset }
-func (h *HelpTab) SetYOffset(y int)         { h.yOffset = y }
-func (h *HelpTab) Following() bool          { return false }
-func (h *HelpTab) SetFollowing(bool)        { /* noop */ }
-func (h *HelpTab) CommandStrings() []string { return nil }
-func (h *HelpTab) Clear()                   {}
+func (h *HelpTab) Name() string                { return h.name }
+func (h *HelpTab) Content() string             { return h.content }
+func (h *HelpTab) Status() TabStatus           { return StatusNone }
+func (h *HelpTab) SetStatus(TabStatus)         { /* noop */ }
+func (h *HelpTab) YOffset() int                { return h.yOffset }
+func (h *HelpTab) SetYOffset(y int)            { h.yOffset = y }
+func (h *HelpTab) Following() bool             { return false }
+func (h *HelpTab) SetFollowing(bool)           { /* noop */ }
+func (h *HelpTab) CommandStrings() []string    { return nil }
+func (h *HelpTab) RunningCmd() *exec.Cmd       { return nil }
+func (h *HelpTab) SetRunningCmd(cmd *exec.Cmd) {}
+func (h *HelpTab) Clear()                      {}
 
 func (h *HelpTab) Write(b []byte) (int, error) {
 	h.content = string(b)
@@ -164,8 +191,6 @@ type Model struct {
 	viewport     viewport.Model
 	tabs         []Tab
 	activeTab    int
-	runningCmds  map[int]*exec.Cmd
-	cmdsMutex    sync.Mutex
 	terminalSize size
 	scrollbar    tea.Model
 	keys         keyMap
@@ -187,18 +212,13 @@ type processExitMsg struct {
 func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 	return func() tea.Msg {
 		log.Debug("starting command execution", "tab", tabIndex, "cmd", commandStrings)
-		m.cmdsMutex.Lock()
-		if m.runningCmds == nil {
-			m.runningCmds = make(map[int]*exec.Cmd)
-		}
 
-		if cmd, exists := m.runningCmds[tabIndex]; exists && cmd != nil && cmd.Process != nil {
-			m.cmdsMutex.Unlock()
-			err := m.killProcess(tabIndex)
+		tab := m.tabs[tabIndex]
+		if cmd := tab.RunningCmd(); cmd != nil && cmd.Process != nil {
+			err := m.killProcess(tab)
 			if err != nil {
 				return processErrorMsg{tabIndex: tabIndex, err: err}
 			}
-			m.cmdsMutex.Lock()
 		}
 
 		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
@@ -216,8 +236,7 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 
 		if err := cmd.Start(); err != nil {
 			log.Error("failed to start command", "error", err)
-			m.cmdsMutex.Unlock()
-			m.tabs[tabIndex].SetStatus(StatusError)
+			tab.SetStatus(StatusError)
 			return processErrorMsg{tabIndex: tabIndex, err: err}
 		}
 
@@ -225,9 +244,8 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 
 		log.Debug("process started successfully", "tab", tabIndex, "pid", cmd.Process.Pid)
 
-		m.runningCmds[tabIndex] = cmd
-		m.tabs[tabIndex].SetStatus(StatusStreaming)
-		m.cmdsMutex.Unlock()
+		tab.SetRunningCmd(cmd)
+		tab.SetStatus(StatusStreaming)
 
 		go func() {
 			defer ptmx.Close()
@@ -235,7 +253,7 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 			for scanner.Scan() {
 				line := scanner.Bytes()
 				// log.Debug("pty received", "tab", tabIndex, "content", string(line))
-				_, err := m.tabs[tabIndex].Write(append(line, '\n'))
+				_, err := tab.Write(append(line, '\n'))
 				if err != nil {
 					// handle this in a better way
 					panic(err)
@@ -244,7 +262,7 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 
 			if err := scanner.Err(); err != nil {
 				// log.Error("pty scanner error", "tab", tabIndex, "error", err)
-				_, err := m.tabs[tabIndex].Write([]byte(fmt.Sprintf("\nPTY error: %v\n", err)))
+				_, err := tab.Write([]byte(fmt.Sprintf("\nPTY error: %v\n", err)))
 				if err != nil {
 					// handle this in a better way
 					panic(err)
@@ -254,21 +272,17 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 
 			if err := cmd.Wait(); err != nil {
 				log.Error("process exited with error", "tab", tabIndex, "error", err)
-				m.cmdsMutex.Lock()
-				delete(m.runningCmds, tabIndex)
-				m.cmdsMutex.Unlock()
-				_, err := m.tabs[tabIndex].Write([]byte(fmt.Sprintf("\nProcess exited with error: %v\n", err)))
+				tab.SetRunningCmd(nil)
+				_, err := tab.Write([]byte(fmt.Sprintf("\nProcess exited with error: %v\n", err)))
 				if err != nil {
 					// handle this in a better way
 					panic(err)
 				}
-				m.tabs[tabIndex].SetStatus(StatusError)
+				tab.SetStatus(StatusError)
 			} else {
 				log.Debug("process exited successfully", "tab", tabIndex)
-				m.cmdsMutex.Lock()
-				delete(m.runningCmds, tabIndex)
-				m.cmdsMutex.Unlock()
-				m.tabs[tabIndex].SetStatus(StatusSuccess)
+				tab.SetRunningCmd(nil)
+				tab.SetStatus(StatusSuccess)
 			}
 		}()
 
@@ -276,23 +290,20 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 	}
 }
 
-func (m *Model) killProcess(tabIndex int) error {
-	m.cmdsMutex.Lock()
-	cmd, exists := m.runningCmds[tabIndex]
-	if !exists || cmd == nil || cmd.Process == nil {
-		m.cmdsMutex.Unlock()
+func (m *Model) killProcess(tab Tab) error {
+	cmd := tab.RunningCmd()
+	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
 	pid := cmd.Process.Pid
-	m.cmdsMutex.Unlock()
 
 	start := time.Now()
-	log.Debug("killing process", "tab", tabIndex, "pid", pid)
+	log.Debug("killing process", "tab", tab.Name(), "pid", pid)
 
 	// Send SIGINT to the process group
 	if err := syscall.Kill(-pid, syscall.SIGINT); err != nil {
 		log.Debug("failed to kill process group", "error", err)
-		return fmt.Errorf("failed to kill process %d: %v", tabIndex, err)
+		return fmt.Errorf("failed to kill process %s: %v", tab.Name(), err)
 	}
 
 	// Wait for process to actually terminate
@@ -319,19 +330,13 @@ func (m *Model) cleanup() tea.Msg {
 	done := make(chan bool)
 
 	go func() {
-		m.cmdsMutex.Lock()
-		tabs := make([]int, 0, len(m.runningCmds))
-		for tabIndex := range m.runningCmds {
-			tabs = append(tabs, tabIndex)
-		}
-		m.cmdsMutex.Unlock()
 		start := time.Now()
 
-		log.Debug("starting cleanup", "process_count", len(tabs))
+		log.Debug("starting cleanup", "process_count", len(m.tabs))
 
-		for _, tabIndex := range tabs {
-			if err := m.killProcess(tabIndex); err != nil {
-				errors = append(errors, fmt.Errorf("tab %d: %w", tabIndex, err))
+		for _, tab := range m.tabs {
+			if err := m.killProcess(tab); err != nil {
+				errors = append(errors, fmt.Errorf("tab %s: %w", tab.Name(), err))
 			}
 		}
 
@@ -375,7 +380,6 @@ func (m *Model) Init() tea.Cmd {
 	}
 	log.Info("application started")
 
-	m.runningCmds = make(map[int]*exec.Cmd)
 	procfile, err := parseProcfile(m.procfilePath)
 	if err != nil {
 		fmt.Printf("Error opening log file: %v\n", err)
@@ -734,7 +738,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				panic(err)
 			}
 		}
-		delete(m.runningCmds, msg.tabIndex)
+		m.tabs[msg.tabIndex].SetRunningCmd(nil)
 	}
 
 	m.viewport, cmd = m.viewport.Update(msg)
