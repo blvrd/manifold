@@ -111,6 +111,8 @@ type Tab interface {
 	CommandStrings() []string
 	RunningCmd() *exec.Cmd
 	SetRunningCmd(*exec.Cmd)
+	Pty() *os.File
+	SetPty(*os.File)
 }
 
 type ProcessTab struct {
@@ -122,6 +124,7 @@ type ProcessTab struct {
 	commandStrings []string
 	runningCmd     *exec.Cmd
 	mu             sync.Mutex
+	pty            *os.File
 }
 
 func NewProcessTab(name string, commandStrings []string) *ProcessTab {
@@ -140,6 +143,18 @@ func (p *ProcessTab) SetYOffset(y int)         { p.yOffset = y }
 func (p *ProcessTab) Following() bool          { return p.following }
 func (p *ProcessTab) SetFollowing(f bool)      { p.following = f }
 func (p *ProcessTab) CommandStrings() []string { return p.commandStrings }
+
+func (p *ProcessTab) Pty() *os.File {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pty
+}
+
+func (p *ProcessTab) SetPty(pty *os.File) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.pty = pty
+}
 
 func (p *ProcessTab) Status() TabStatus {
 	p.mu.Lock()
@@ -187,6 +202,8 @@ func (h *HelpTab) CommandStrings() []string    { return nil }
 func (h *HelpTab) RunningCmd() *exec.Cmd       { return nil }
 func (h *HelpTab) SetRunningCmd(cmd *exec.Cmd) {}
 func (h *HelpTab) Clear()                      {}
+func (h *HelpTab) Pty() *os.File               { return nil }
+func (h *HelpTab) SetPty(*os.File)             {}
 
 func (h *HelpTab) Write(b []byte) (int, error) {
 	h.content = string(b)
@@ -230,29 +247,20 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 
 		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
 		// set up a new process group to be identified later
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		// cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-		ptmx, tty, err := pty.Open()
+		ptmx, err := pty.Start(cmd)
 		if err != nil {
-			log.Error("failed to open pty", "error", err)
-		}
-
-		cmd.Stdout = tty
-		cmd.Stderr = tty
-		cmd.Stdin = tty
-
-		if err := cmd.Start(); err != nil {
-			log.Error("failed to start command", "error", err)
+			log.Error("failed to open pty or start command", "error", err)
 			tab.SetStatus(StatusError)
 			return processErrorMsg{tabIndex: tabIndex, err: err}
 		}
 
-		tty.Close()
-
-		log.Debug("process started successfully", "tab", tabIndex, "pid", cmd.Process.Pid)
-
+		tab.SetPty(ptmx)
 		tab.SetRunningCmd(cmd)
 		tab.SetStatus(StatusStreaming)
+
+		log.Debug("process started successfully", "tab", tabIndex, "pid", cmd.Process.Pid)
 
 		errChan := make(chan processErrorMsg)
 
