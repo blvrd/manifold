@@ -131,7 +131,7 @@ func NewProcessTab(name string, commandStrings []string) *ProcessTab {
 	return &ProcessTab{
 		name:           name,
 		commandStrings: commandStrings,
-		buffer:         newBufferedOutput(1024*1024), // 1MB
+		buffer:         newBufferedOutput(1024 * 1024), // 1MB
 	}
 }
 
@@ -221,6 +221,7 @@ type Model struct {
 	help         help.Model
 	procfilePath string
 	quitting     bool
+	interactive  bool
 }
 
 type processErrorMsg struct {
@@ -433,6 +434,10 @@ func (m *Model) currentTab() Tab {
 	return m.tabs[m.activeTab]
 }
 
+func (m *Model) toggleInteractiveMode() {
+	m.interactive = !m.interactive
+}
+
 func (m *Model) getHelpContent() string {
 	var content strings.Builder
 
@@ -514,6 +519,9 @@ func (m *Model) View() string {
 	if len(m.currentTab().CommandStrings()) > 0 {
 		doc.WriteString(lipgloss.NewStyle().Foreground(lightText).Render(fmt.Sprintf("Running: %s", strings.Join(m.currentTab().CommandStrings(), " "))))
 	}
+	if m.interactive {
+		doc.WriteString(" (interactive)")
+	}
 	doc.WriteString("\n")
 	if m.viewport.TotalLineCount() > m.viewport.VisibleLineCount() {
 		doc.WriteString(
@@ -588,18 +596,19 @@ func (m *Model) switchToLastTab() tea.Cmd {
 }
 
 type keyMap struct {
-	Up             key.Binding
-	Down           key.Binding
-	Left           key.Binding
-	Right          key.Binding
-	RestartProcess key.Binding
-	Clear          key.Binding
-	Follow         key.Binding
-	Unfollow       key.Binding
-	ScrollTop      key.Binding
-	ScrollBottom   key.Binding
-	Help           key.Binding
-	Quit           key.Binding
+	Up              key.Binding
+	Down            key.Binding
+	Left            key.Binding
+	Right           key.Binding
+	RestartProcess  key.Binding
+	InteractiveMode key.Binding
+	Clear           key.Binding
+	Follow          key.Binding
+	Unfollow        key.Binding
+	ScrollTop       key.Binding
+	ScrollBottom    key.Binding
+	Help            key.Binding
+	Quit            key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -608,7 +617,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.RestartProcess, k.Clear, k.Follow, k.Unfollow},
+		{k.RestartProcess, k.InteractiveMode, k.Clear, k.Follow, k.Unfollow},
 		{k.Up, k.Down, k.Left, k.Right, k.ScrollTop, k.ScrollBottom},
 		{k.Help, k.Quit},
 	}
@@ -634,6 +643,10 @@ var keys = keyMap{
 	RestartProcess: key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("r", "restart process"),
+	),
+	InteractiveMode: key.NewBinding(
+		key.WithKeys("i"),
+		key.WithHelp("i", "toggle interactive mode"),
 	),
 	Clear: key.NewBinding(
 		key.WithKeys("c"),
@@ -693,6 +706,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.switchToLastTab()
 		case key.Matches(msg, keys.RestartProcess):
 			return m, m.restartProcess(m.activeTab)
+		case key.Matches(msg, keys.InteractiveMode):
+			m.toggleInteractiveMode()
+
+			return m, nil
 		case key.Matches(msg, keys.Clear):
 			m.currentTab().Clear()
 			return m, nil
