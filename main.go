@@ -113,6 +113,7 @@ type Tab interface {
 	SetRunningCmd(*exec.Cmd)
 	Pty() *os.File
 	SetPty(*os.File)
+	WriteToPty([]byte) error
 }
 
 type ProcessTab struct {
@@ -154,6 +155,13 @@ func (p *ProcessTab) SetPty(pty *os.File) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.pty = pty
+}
+
+func (p *ProcessTab) WriteToPty(b []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.pty.Write(b)
+	return err
 }
 
 func (p *ProcessTab) Status() TabStatus {
@@ -204,6 +212,7 @@ func (h *HelpTab) SetRunningCmd(cmd *exec.Cmd) {}
 func (h *HelpTab) Clear()                      {}
 func (h *HelpTab) Pty() *os.File               { return nil }
 func (h *HelpTab) SetPty(*os.File)             {}
+func (h *HelpTab) WriteToPty(b []byte) error   { return nil }
 
 func (h *HelpTab) Write(b []byte) (int, error) {
 	h.content = string(b)
@@ -267,25 +276,25 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 
 		go func() {
 			defer ptmx.Close()
-			scanner := bufio.NewScanner(ptmx)
-			for scanner.Scan() {
-				line := scanner.Bytes()
-				// log.Debug("pty received", "tab", tabIndex, "content", string(line))
-				_, err := tab.Write(append(line, '\n'))
+			buffer := make([]byte, 1024)
+			for {
+				n, err := ptmx.Read(buffer)
+				if n > 0 {
+					log.Debug("pty received", "tab", tabIndex, "content", string(buffer[:n]))
+					_, err := tab.Write(buffer[:n])
+					if err != nil {
+						errChan <- processErrorMsg{err: err, tabIndex: tabIndex}
+						return
+					}
+				}
 				if err != nil {
-					errChan <- processErrorMsg{err: err, tabIndex: tabIndex}
-					return
+					if err != io.EOF {
+						log.Error("pty read error", "tab", tabIndex, "error", err)
+					}
+          break
 				}
 			}
 
-			if err := scanner.Err(); err != nil {
-				// log.Error("pty scanner error", "tab", tabIndex, "error", err)
-				_, err := tab.Write([]byte(fmt.Sprintf("\nPTY error: %v\n", err)))
-				if err != nil {
-					errChan <- processErrorMsg{err: err, tabIndex: tabIndex}
-					return
-				}
-			}
 			// log.Debug("pty scanner finished", "tab", tabIndex)
 
 			if err := cmd.Wait(); err != nil {
@@ -692,6 +701,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.interactive {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc":
+				m.toggleInteractiveMode()
+				return m, nil
+			default:
+				tab := m.currentTab()
+				tab.WriteToPty([]byte(msg.String()))
+			}
+    case tickMsg:
+      m.viewport.SetContent(m.tabs[m.activeTab].Content())
+      if m.currentTab().Following() {
+        m.viewport.GotoBottom()
+      }
+		}
+
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -820,7 +850,7 @@ func main() {
 	)
 
 	go func() {
-		for c := range time.Tick(100 * time.Millisecond) {
+		for c := range time.Tick(50 * time.Millisecond) {
 			cmd.Send(tickMsg(c))
 		}
 	}()
