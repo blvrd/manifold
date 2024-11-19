@@ -291,7 +291,7 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 					if err != io.EOF {
 						log.Error("pty read error", "tab", tabIndex, "error", err)
 					}
-          break
+					break
 				}
 			}
 
@@ -704,19 +704,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.interactive {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
-			case "esc":
+			switch msg.Type {
+			case tea.KeyEsc:
 				m.toggleInteractiveMode()
 				return m, nil
+			case tea.KeyCtrlC:
+				tab := m.currentTab()
+				tab.WriteToPty([]byte{3})
+			case tea.KeyEnter:
+				tab := m.currentTab()
+				tab.WriteToPty([]byte("\n"))
 			default:
 				tab := m.currentTab()
 				tab.WriteToPty([]byte(msg.String()))
 			}
-    case tickMsg:
-      m.viewport.SetContent(m.tabs[m.activeTab].Content())
-      if m.currentTab().Following() {
-        m.viewport.GotoBottom()
-      }
+		case tickMsg:
+			m.viewport.SetContent(m.tabs[m.activeTab].Content())
+			if m.currentTab().Following() {
+				m.viewport.GotoBottom()
+			}
 		}
 
 		return m, nil
