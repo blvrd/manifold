@@ -33,9 +33,9 @@ type size struct {
 }
 
 type bufferedOutput struct {
-	maxBytes int
-	buffer   []byte
-	mu       sync.Mutex
+	maxBytes       int
+	buffer         []byte
+	mu             sync.Mutex
 }
 
 func newBufferedOutput(maxBytes int) *bufferedOutput {
@@ -55,21 +55,35 @@ func (b *bufferedOutput) Write(data []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	newSize := len(b.buffer) + len(data)
-	if newSize > b.maxBytes {
-		// How much do we need to truncate?
-		spillover := newSize - b.maxBytes
+	for i := 0; i < len(data); i++ {
+		switch data[i] {
+		case 8: // Backspace character
+			if i == 0 || data[i-1] != 32 { // if not preceded by a space
+				if len(b.buffer) > 0 {
+					b.buffer = b.buffer[:len(b.buffer)-1]
+					log.Debugf("%s", b.buffer)
+				}
+			}
+		case 32: // Space
+			byteIsSpaceBetweenBackspaceChars := i > 0 && i < len(data)-1 && data[i-1] == 8 && data[i+1] == 8
 
-		if spillover < len(b.buffer) {
-			copy(b.buffer, b.buffer[spillover:])
-			b.buffer = b.buffer[:len(b.buffer)-spillover]
-		} else {
-			b.buffer = b.buffer[:0]
+			if byteIsSpaceBetweenBackspaceChars {
+				// This is part of a backspace sequence (\b \b), skip it
+				continue
+			}
+
+			b.buffer = append(b.buffer, data[i])
+		default:
+			b.buffer = append(b.buffer, data[i])
 		}
-		return len(data), nil
 	}
 
-	b.buffer = append(b.buffer, data...)
+	// Maintain max size
+	if len(b.buffer) > b.maxBytes {
+		excess := len(b.buffer) - b.maxBytes
+		b.buffer = b.buffer[excess:]
+	}
+
 	return len(data), nil
 }
 
@@ -160,6 +174,8 @@ func (p *ProcessTab) SetPty(pty *os.File) {
 func (p *ProcessTab) WriteToPty(b []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	log.Debug("writing to pty", "bytes", fmt.Sprintf("%v", b))
 	_, err := p.pty.Write(b)
 	return err
 }
@@ -231,6 +247,7 @@ type Model struct {
 	procfilePath string
 	quitting     bool
 	interactive  bool
+	program      *tea.Program
 }
 
 type processErrorMsg struct {
@@ -280,12 +297,13 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 			for {
 				n, err := ptmx.Read(buffer)
 				if n > 0 {
-					log.Debug("pty received", "tab", tabIndex, "content", string(buffer[:n]))
+					// log.Debug("pty received", "tab", tabIndex, "content", string(buffer[:n]))
 					_, err := tab.Write(buffer[:n])
 					if err != nil {
 						errChan <- processErrorMsg{err: err, tabIndex: tabIndex}
 						return
 					}
+					m.program.Send(tickMsg(time.Now()))
 				}
 				if err != nil {
 					if err != io.EOF {
@@ -704,18 +722,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.interactive {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
+			tab := m.currentTab()
 			switch msg.Type {
 			case tea.KeyEsc:
 				m.toggleInteractiveMode()
 				return m, nil
 			case tea.KeyCtrlC:
-				tab := m.currentTab()
 				tab.WriteToPty([]byte{3})
+			case tea.KeyBackspace:
+				tab.WriteToPty([]byte{0x7F}) // ASCII DEL
+			case tea.KeyLeft:
+				tab.WriteToPty([]byte{0x1b, 0x5b, 0x44}) // ESC [ D
+			case tea.KeyRight:
+				tab.WriteToPty([]byte{0x1b, 0x5b, 0x43}) // ESC [ C
+			case tea.KeyUp:
+				tab.WriteToPty([]byte{0x1b, 0x5b, 0x41}) // ESC [ A
+			case tea.KeyDown:
+				tab.WriteToPty([]byte{0x1b, 0x5b, 0x42}) // ESC [ B
+			case tea.KeyCtrlE:
+				tab.WriteToPty([]byte{0x05}) // ASCII ENQ
+			case tea.KeyCtrlA:
+				tab.WriteToPty([]byte{0x01}) // ASCII SOH
 			case tea.KeyEnter:
-				tab := m.currentTab()
-				tab.WriteToPty([]byte("\n"))
+				tab.WriteToPty([]byte{0x0D}) // ASCII CR
 			default:
-				tab := m.currentTab()
 				tab.WriteToPty([]byte(msg.String()))
 			}
 		case tickMsg:
@@ -846,14 +876,18 @@ func main() {
 		}
 	}
 
+	model := &Model{
+		keys:         keys,
+		help:         help.New(),
+		procfilePath: *procfilePath,
+	}
+
 	cmd := tea.NewProgram(
-		&Model{
-			keys:         keys,
-			help:         help.New(),
-			procfilePath: *procfilePath,
-		},
+		model,
 		tea.WithAltScreen(),
 	)
+
+	model.program = cmd
 
 	go func() {
 		for c := range time.Tick(50 * time.Millisecond) {
