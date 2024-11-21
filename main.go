@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/blvrd/manifold/help"
 	"github.com/blvrd/manifold/scrollbar"
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
