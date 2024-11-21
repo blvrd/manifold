@@ -36,6 +36,8 @@ type bufferedOutput struct {
 	maxBytes       int
 	buffer         []byte
 	mu             sync.Mutex
+	cursorPosition int
+	inputStart     int
 }
 
 func newBufferedOutput(maxBytes int) *bufferedOutput {
@@ -55,14 +57,36 @@ func (b *bufferedOutput) Write(data []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// Check if this is program output by looking for control sequences
+	isProgramOutput := true
+	for _, b := range data {
+		// If we see any control characters, this is user input
+		if b == 0x7F || // backspace
+			b == 0x5e || // ^ (start of arrow key sequence)
+			b == 0x1b { // ESC
+			isProgramOutput = false
+			break
+		}
+	}
+
+	if isProgramOutput {
+		b.buffer = append(b.buffer, data...)
+		b.cursorPosition = len(b.buffer)
+		b.inputStart = b.cursorPosition
+		return len(data), nil
+	}
+
 	for i := 0; i < len(data); i++ {
 		switch data[i] {
 		case 8: // Backspace character
-			if i == 0 || data[i-1] != 32 { // if not preceded by a space
-				if len(b.buffer) > 0 {
-					b.buffer = b.buffer[:len(b.buffer)-1]
-					log.Debugf("%s", b.buffer)
-				}
+			// Skip the entire \b \b sequence
+			if i+2 < len(data) && data[i+1] == 32 && data[i+2] == 8 {
+				i += 2 // Skip the space and second backspace
+				continue
+			}
+			if len(b.buffer) > 0 && b.cursorPosition > b.inputStart {
+				b.buffer = append(b.buffer[:b.cursorPosition-1], b.buffer[b.cursorPosition:]...)
+				b.cursorPosition--
 			}
 		case 32: // Space
 			byteIsSpaceBetweenBackspaceChars := i > 0 && i < len(data)-1 && data[i-1] == 8 && data[i+1] == 8
@@ -71,10 +95,36 @@ func (b *bufferedOutput) Write(data []byte) (int, error) {
 				// This is part of a backspace sequence (\b \b), skip it
 				continue
 			}
-
-			b.buffer = append(b.buffer, data[i])
+			if b.cursorPosition == len(b.buffer) {
+				b.buffer = append(b.buffer, data[i])
+			} else {
+				b.buffer = append(b.buffer[:b.cursorPosition], append([]byte{data[i]}, b.buffer[b.cursorPosition:]...)...)
+			}
+			b.cursorPosition++
+		case 0x5e:
+			if i+3 < len(data) && data[i+1] == '[' && data[i+2] == '[' {
+				switch data[i+3] {
+				case 'D': // Left arrow
+					if b.cursorPosition > b.inputStart {
+						b.cursorPosition--
+					}
+					i += 3 // Skip the next two bytes
+				case 'C': // Right arrow
+					if b.cursorPosition < len(b.buffer) {
+						b.cursorPosition++
+					}
+					i += 3
+				}
+				continue
+			}
+			fallthrough
 		default:
-			b.buffer = append(b.buffer, data[i])
+			if b.cursorPosition == len(b.buffer) {
+				b.buffer = append(b.buffer, data[i])
+			} else {
+				b.buffer = append(b.buffer[:b.cursorPosition], append([]byte{data[i]}, b.buffer[b.cursorPosition:]...)...)
+			}
+			b.cursorPosition++
 		}
 	}
 
@@ -82,6 +132,7 @@ func (b *bufferedOutput) Write(data []byte) (int, error) {
 	if len(b.buffer) > b.maxBytes {
 		excess := len(b.buffer) - b.maxBytes
 		b.buffer = b.buffer[excess:]
+		b.cursorPosition = max(0, b.cursorPosition-excess)
 	}
 
 	return len(data), nil
@@ -91,7 +142,28 @@ func (b *bufferedOutput) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return string(b.buffer)
+	var result strings.Builder
+
+	// Write everything up to the cursor
+	result.Write(b.buffer[:b.cursorPosition])
+
+	// Invert the character at cursor position (or space if at end)
+	if b.cursorPosition < len(b.buffer) {
+		// Invert existing character
+		result.WriteString("\x1b[7m") // Start inverse
+		result.WriteByte(b.buffer[b.cursorPosition])
+		result.WriteString("\x1b[0m") // Reset formatting
+
+		// Write the rest after cursor
+		result.Write(b.buffer[b.cursorPosition+1:])
+	} else {
+		// At the end of buffer, show inverted space
+		result.WriteString("\x1b[7m \x1b[0m")
+		// No need to write anything after cursor
+	}
+
+	return result.String()
+
 }
 
 func (b *bufferedOutput) Clear() {
@@ -205,6 +277,7 @@ func (p *ProcessTab) SetRunningCmd(cmd *exec.Cmd) {
 
 func (p *ProcessTab) Write(b []byte) (int, error) {
 	p.SetStatus(StatusStreaming)
+	log.Debug("ProcessTab.Write", "bytes", fmt.Sprintf("%#v", b), "as_string", string(b))
 	return p.buffer.Write(b)
 }
 
