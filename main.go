@@ -229,6 +229,11 @@ func (m *Model) runCmd(tabIndex int, commandStrings []string) tea.Cmd {
 		}
 
 		cmd := exec.Command(commandStrings[0], commandStrings[1:]...)
+		wd, err := os.Getwd()
+		if err != nil {
+			log.Error("failed to get current working directory", "error", err)
+		}
+		cmd.Dir = wd
 		// set up a new process group to be identified later
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
