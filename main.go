@@ -128,7 +128,7 @@ func NewProcessTab(name string, commandStrings []string) *ProcessTab {
 	return &ProcessTab{
 		name:           name,
 		commandStrings: commandStrings,
-		buffer:         newBufferedOutput(1000),
+		buffer:         newBufferedOutput(1024 * 1024),
 	}
 }
 
